@@ -62,6 +62,21 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .ico.s{background:var(--scrap);clip-path:polygon(0 30%,40% 0,100% 20%,85% 100%,15% 90%)}
 .ico.g{background:var(--gas);border-radius:50%;box-shadow:0 0 6px var(--gas)}
 .pop{color:var(--dim)} .pop b{color:var(--fg);font-weight:600}
+.wv{color:var(--bad);font-size:12px;white-space:nowrap}
+.wv:empty{display:none}
+/* 研究所：兵種 × 兩個技能 */
+.rgrid{display:grid;grid-template-columns:34px 84px 84px;gap:5px;align-items:center}
+.runit{display:grid;place-items:center}
+.runit .bi{width:28px;height:28px;border:2px solid var(--ally);border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--ally)}
+.rtile{height:46px;border-radius:10px;border:1px solid var(--line);background:linear-gradient(var(--btn-top),var(--btn-bot));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0;cursor:pointer}
+.rtile b{font-size:12.5px;font-weight:700}
+.rtile span{display:flex;align-items:center;gap:3px;font-family:var(--num);font-size:10px;color:var(--dim)}
+.rtile span .ico{width:7px;height:7px}
+.rtile.done{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+.rtile.done span{color:var(--ok)}
+.rtile.run{border-color:var(--accent)}
+.rtile.run span{color:var(--accent)}
+.rtile.lock{opacity:.35}
 .pop.full b{color:var(--bad)}
 .icobtn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;font-size:16px;cursor:pointer;padding:0}
 
@@ -217,6 +232,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   <div class="hud" id="topR">
     <div class="resbox">
+      <span class="wv" id="wave"></span>
       <span class="res" title="廢料"><i class="ico s"></i><span id="rs">0</span></span>
       <span class="res" title="輻能氣"><i class="ico g"></i><span id="rg">0</span><small id="rgr" style="color:var(--dim);font-size:11px"></small></span>
       <span class="pop" id="popEl">人口 <b id="pu">0</b>/<span id="pc">0</span></span>
@@ -263,8 +279,16 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         <li><b>技能</b>：圍在攻擊鈕旁，5 個以內全部顯示，6 個以上才出現「換」</li>
         <li><b>地圖選取</b>：點單位就選它（有選取時也一樣）；對單位連點兩下選畫面內同種；按住 0.5 秒圈選（有選取時也可以，點一下仍是移動）</li>
       </ul>
-      <h2>開局</h2>
-      <p>預設是正式開局：1 座主堡、3 個工兵。每座主堡最多 8 個工兵採廢料。右上 ⚙ 可以換成測試開局（已有建築和部隊）。</p>
+      <h2>開局與科技</h2>
+      <ul>
+        <li><b>正式開局</b>：1 座主堡、3 個工兵、人口上限 10。每座主堡最多 8 個工兵採廢料</li>
+        <li><b>主堡</b>：工兵、升級、擴建共用一條佇列。升級 Lv2 解鎖空軍基地、Lv3 解鎖研究所、Lv4 特殊單位（尚未設計）</li>
+        <li><b>擴建</b>：人口上限依序 +5、+10、+10、+15，最多 50，費用逐次增加</li>
+        <li><b>生產基地強化</b>：Lv1 攻擊、Lv2 防禦、Lv3 攻防都再提升（地面、空軍分開算）</li>
+        <li><b>研究所</b>：每個兵種的技能二選一，研究完才會出現技能按鈕</li>
+        <li><b>拾荒者攻勢</b>：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波；右上顯示倒數</li>
+        <li>右上 ⚙ 可以換成<b>測試開局</b>：已有建築、部隊，技能都選了第一個</li>
+      </ul>
       <h2>三族建造方式</h2>
       <ul>
         <li><b>拾荒者</b>：選工兵 → 建造 → 放置 → 確認，工兵走過去蓋。輻能氣靠抽氣塔，太近會互搶</li>
@@ -315,23 +339,60 @@ const TY={
   depot:   {cat:'building',name:'採集場',ch:'採',hp:600,r:34,cost:[100,0],bt:12},
   barracks:{cat:'building',name:'地面基地',ch:'地',hp:900,r:44,cost:[150,0],bt:16},
   airbase: {cat:'building',name:'空軍基地',ch:'空',hp:800,r:44,cost:[150,100],bt:20},
-  turret:  {cat:'building',name:'砲塔',ch:'砲',hp:500,r:26,cost:[100,0],bt:10,range:210,dmg:12,cd:1},
+  turret:  {cat:'building',name:'砲塔',ch:'砲',hp:500,r:26,cost:[100,0],bt:10,range:210,dmg:12,cd:1,ag:1,aa:1},
+  lab:     {cat:'building',name:'研究所',ch:'研',hp:700,r:38,cost:[150,100],bt:20},
   pump:    {cat:'building',name:'抽氣塔',ch:'抽',hp:300,r:22,cost:[75,0],bt:10},
   lung:    {cat:'building',name:'吸氣巢',ch:'吸',hp:350,r:24,cost:[75,0],bt:12},
-  worker:  {cat:'worker',name:'工兵',ch:'工',hp:40,r:12,speed:85,range:24,dmg:3,cd:1,cost:[50,0],pt:6,pop:1},
+  worker:  {cat:'worker',name:'工兵',ch:'工',hp:40,r:12,speed:85,range:24,dmg:3,cd:1,cost:[50,0],pt:6,pop:1,ag:1,aa:0},
   drone:   {cat:'worker',name:'無人機',ch:'氣',hp:30,r:10,speed:95,cost:[50,0],pt:5,pop:1},
   pack:    {cat:'pack',name:'待部署',ch:'',hp:1,r:1,speed:55},
-  inf:     {cat:'ground',name:'步兵',ch:'步',hp:55,r:14,speed:80,range:110,dmg:6,cd:.8,cost:[50,0],pt:5,pop:1,skill:{id:'stim',name:'興奮',cd:15}},
-  rocket:  {cat:'ground',name:'火箭兵',ch:'火',hp:50,r:14,speed:72,range:150,dmg:10,cd:1.4,cost:[75,25],pt:7,pop:1,skill:{id:'salvo',name:'齊射',cd:12}},
-  tank:    {cat:'ground',name:'坦克',ch:'坦',hp:170,r:20,speed:60,range:170,dmg:18,cd:1.8,cost:[150,75],pt:12,pop:3,skill:{id:'siege',name:'架設',cd:1.5}},
-  mech:    {cat:'ground',name:'機甲',ch:'機',hp:210,r:19,speed:66,range:50,dmg:16,cd:1,cost:[125,50],pt:10,pop:2,skill:{id:'shield',name:'護盾',cd:18}},
-  scout:   {cat:'air',name:'偵察機',ch:'偵',hp:60,r:14,speed:140,range:100,dmg:4,cd:1,cost:[50,25],pt:6,pop:1},
-  fighter: {cat:'air',name:'戰鬥機',ch:'戰',hp:90,r:16,speed:115,range:130,dmg:9,cd:.9,cost:[100,50],pt:9,pop:2,skill:{id:'boost',name:'加力',cd:12}},
-  bomber:  {cat:'air',name:'轟炸機',ch:'轟',hp:150,r:20,speed:80,range:70,dmg:14,cd:2,cost:[150,100],pt:12,pop:3,skill:{id:'bomb',name:'轟炸',cd:12}},
+  // 蔓生族、遺械暫用的測試兵種
+  inf:     {cat:'ground',name:'步兵',ch:'步',hp:55,r:14,speed:80,range:110,dmg:6,cd:.8,cost:[50,0],pt:5,pop:1,ag:1,aa:0,sk:['adren','grenade']},
+  rocket:  {cat:'ground',name:'火箭兵',ch:'火',hp:50,r:14,speed:72,range:150,dmg:10,cd:1.4,cost:[75,25],pt:7,pop:1,ag:1,aa:1,sk:['salvo','ap']},
+  tank:    {cat:'ground',name:'坦克',ch:'坦',hp:170,r:20,speed:60,range:170,dmg:18,cd:1.8,cost:[150,75],pt:12,pop:3,ag:1,aa:0,sk:['siege','overload']},
+  mech:    {cat:'ground',name:'機甲',ch:'機',hp:210,r:19,speed:66,range:50,dmg:16,cd:1,cost:[125,50],pt:10,pop:2,ag:1,aa:0,sk:['shield','charge']},
+  scout:   {cat:'air',name:'偵察機',ch:'偵',hp:60,r:14,speed:140,range:100,dmg:4,cd:1,cost:[50,25],pt:6,pop:1,ag:1,aa:1,sk:['flare','boost']},
+  fighter: {cat:'air',name:'戰鬥機',ch:'戰',hp:90,r:16,speed:115,range:130,dmg:9,cd:.9,cost:[100,50],pt:9,pop:2,ag:1,aa:1,sk:['boost','spread']},
+  bomber:  {cat:'air',name:'轟炸機',ch:'轟',hp:150,r:20,speed:80,range:70,dmg:14,cd:2,cost:[150,100],pt:12,pop:3,ag:1,aa:0,sk:['carpet','cluster']},
+  // 拾荒者：全部都是人在操控機器
+  rifle:   {cat:'ground',name:'槍兵',ch:'槍',hp:50,r:13,speed:80,range:110,dmg:6,cd:.8,cost:[50,0],pt:5,pop:1,ag:1,aa:0,sk:['adren','grenade']},
+  srocket: {cat:'ground',name:'火箭兵',ch:'火',hp:55,r:14,speed:72,range:150,dmg:12,cd:1.5,cost:[75,25],pt:7,pop:1,ag:1,aa:1,sk:['salvo','ap']},
+  heavy:   {cat:'ground',name:'重甲兵',ch:'甲',hp:220,r:17,speed:55,range:40,dmg:14,cd:1,cost:[100,25],pt:9,pop:2,ag:1,aa:0,sk:['shield','charge']},
+  biker:   {cat:'ground',name:'機槍車手',ch:'車',hp:80,r:15,speed:130,range:100,dmg:5,cd:.4,cost:[75,25],pt:7,pop:2,ag:1,aa:0,sk:['nitro','spray']},
+  walker:  {cat:'ground',name:'重武裝手',ch:'武',hp:260,r:21,speed:50,range:160,dmg:20,cd:1.6,cost:[175,100],pt:14,pop:3,ag:1,aa:1,sk:['siege','overload']},
+  jetpack: {cat:'air',name:'噴射包兵',ch:'噴',hp:50,r:12,speed:150,range:0,dmg:0,cd:1,cost:[50,25],pt:6,pop:1,ag:0,aa:0,sk:['flare','boost']},
+  turbo:   {cat:'air',name:'渦輪機翼兵',ch:'渦',hp:90,r:15,speed:115,range:120,dmg:7,cd:.6,cost:[100,50],pt:9,pop:2,ag:1,aa:1,sk:['boost','spread']},
+  glider:  {cat:'air',name:'立翔榴彈兵',ch:'榴',hp:110,r:16,speed:95,range:130,dmg:12,cd:1.3,cost:[125,75],pt:10,pop:2,ag:1,aa:1,sk:['airburst','rapid']},
+  divebomber:{cat:'air',name:'俯翼轟炸兵',ch:'俯',hp:150,r:19,speed:85,range:60,dmg:18,cd:2,cost:[150,100],pt:12,pop:3,ag:1,aa:0,sk:['carpet','cluster']},
   scrap:   {cat:'res',name:'廢料堆',ch:'',r:22,amt:1500},
 };
-const PROD={base:['worker'],barracks:['inf','rocket','tank','mech'],airbase:['scout','fighter','bomber']};
-const BUILDS={scav:['barracks','airbase','turret','pump','base'],vine:['barracks','airbase','turret','lung','base'],mech:['barracks','airbase','turret','base']};
+const PROD={base:['worker'],barracks:[],airbase:[]};
+const ROSTER={scav:{barracks:['rifle','srocket','heavy','biker','walker'],airbase:['jetpack','turbo','glider','divebomber']},
+  vine:{barracks:['inf','rocket','tank','mech'],airbase:['scout','fighter','bomber']},
+  mech:{barracks:['inf','rocket','tank','mech'],airbase:['scout','fighter','bomber']}};
+// 技能：每個兵種在研究所從兩個裡選一個
+const SK={
+  adren:{name:'腎上腺素',fx:'haste',dur:5,cd:15},grenade:{name:'手榴彈',fx:'aoe',r:60,dmg:30,cd:12},
+  salvo:{name:'齊射',fx:'next',cd:12},ap:{name:'穿甲彈',fx:'dmgup',mult:2,dur:4,cd:14},
+  shield:{name:'護盾',fx:'shield',amt:80,dur:6,cd:18},charge:{name:'衝鋒',fx:'speed',mult:2.2,dur:3,cd:12},
+  nitro:{name:'氮氣',fx:'speed',mult:1.8,dur:4,cd:12},spray:{name:'掃射',fx:'haste',dur:4,cd:14},
+  siege:{name:'架設',fx:'siege',cd:1.5},overload:{name:'過載',fx:'dmgup',mult:1.5,dur:6,cd:18},
+  flare:{name:'標記',fx:'mark',r:140,dur:6,cd:15},boost:{name:'加力',fx:'speed',mult:2,dur:4,cd:12},
+  spread:{name:'散射',fx:'haste',dur:4,cd:14},airburst:{name:'空爆',fx:'aoe',r:70,dmg:35,cd:12},
+  rapid:{name:'連發',fx:'haste',dur:5,cd:15},carpet:{name:'地毯轟炸',fx:'aoeSelf',r:110,dmg:40,cd:14,groundOnly:true},
+  cluster:{name:'集束彈',fx:'aoe3',r:55,dmg:25,cd:12,groundOnly:true},
+};
+// 主堡升級、擴建、生產基地升級：費用逐級上升
+const BASE_UP={cost:[[150,50],[200,100],[300,200]],t:[25,30,40],unlock:['空軍基地','研究所','特殊單位（尚未設計）']};
+const EXPAND={add:[5,10,10,15],cost:[[50,0],[100,0],[150,50],[200,100]],t:[10,12,15,18]};
+const PROD_UP={cost:[[100,50],[150,100],[200,150]],t:[20,25,30],eff:['攻擊 +15%','防禦 +10%','攻擊、防禦再提升']};
+const TUR_UP={cost:[75,0],t:8},SKILL_COST=[100,100],SKILL_T=20;
+const BUILD_REQ={airbase:2,lab:3};
+// 拾荒者攻勢：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波
+const WAVES=[{rifle:4},{rifle:5,srocket:2},{rifle:4,srocket:2,biker:2},{rifle:4,heavy:2,biker:2,jetpack:1},{rifle:5,srocket:3,heavy:2,turbo:2},
+  {rifle:4,heavy:2,biker:3,walker:2,glider:2},{rifle:6,srocket:3,heavy:3,turbo:2,divebomber:2},{rifle:6,heavy:4,biker:3,walker:2,glider:3,divebomber:2},
+  {rifle:8,srocket:4,heavy:4,walker:3,turbo:3,divebomber:3},{rifle:10,srocket:5,heavy:5,walker:4,turbo:4,glider:4,divebomber:4}];
+const BUILDS={scav:['barracks','airbase','lab','turret','pump','base'],vine:['barracks','airbase','lab','turret','lung','base'],mech:['barracks','airbase','lab','turret','base']};
 const CATS=[['building','建','建築'],['worker','工','工兵'],['ground','地','地面'],['air','空','空軍']];
 
 // ---------- 設定 ----------
@@ -340,7 +401,7 @@ const SETDEF=[
   ['snap','有選取時拖曳鏡頭，放開後',[['back','部隊離開畫面才回到部隊','你的原設計'],['stay','一律停在原處','']]],
   ['autoGather','新生產的工兵',[['off','待命','你的原設計'],['on','自動去採廢料','建議']]],
   ['start','開局（切換會重置戰場）',[['formal','正式開局：1 堡 3 工兵',''],['sandbox','測試開局：已有建築和部隊','']]],
-  ['waves','敵軍定期進攻（測反應用）',[['on','開',''],['off','關','']]],
+  ['waves','拾荒者攻勢（10 波：第 3 分鐘起每 2 分鐘一波）',[['on','開',''],['off','關','']]],
 ];
 const SET={};
 SETDEF.forEach(([k,,o])=>SET[k]=o[0][0]);
@@ -351,7 +412,7 @@ let FAC=SET.faction;
 // ---------- 狀態 ----------
 let ents=[],byId=new Map(),nextId=1,sel=new Set(),slots=[[],[],[],[],[]];
 let res={s:0,g:0},gasRate=0,up={ground:0,air:0,gather:0},mode=null;
-let markers=[],shots=[],booms=[],patches=[],pend=[],events=[],waveT=100,time=0,connT=0,skillPage=0;
+let markers=[],shots=[],booms=[],patches=[],pend=[],events=[],waveT=180,waveN=0,waveDone=false,time=0,connT=0,skillPage=0;
 let cam={x:520,y:1180,z:1};
 let VW=0,VH=0,DPR=1;
 
@@ -378,22 +439,23 @@ function spawn(type,team,x,y,o){
 }
 
 function reset(){
-  FAC=SET.faction;PROD.base=FAC==='mech'?['worker','drone']:['worker'];
+  FAC=SET.faction;PROD.base=FAC==='mech'?['worker','drone']:['worker'];PROD.barracks=ROSTER[FAC].barracks;PROD.airbase=ROSTER[FAC].airbase;
   ents=[];byId=new Map();nextId=1;sel=new Set();slots=[[],[],[],[],[]];
   const sandbox=SET.start==='sandbox';
-  res=sandbox?{s:500,g:150}:{s:250,g:50};up={ground:0,air:0,gather:0};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
-  waveT=sandbox?100:240;time=0;skillPage=0;
+  res=sandbox?{s:800,g:400}:{s:250,g:50};up={ground:0,air:0,gather:0,skill:{},pend:{}};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
+  waveT=180;waveN=0;waveDone=false;time=0;skillPage=0;
   patches=[];let sd=7;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
   for(let i=0;i<140;i++)patches.push({x:rnd()*W,y:rnd()*H,r:60+rnd()*180,d:rnd()<.55});
   // 廢料區：主基地 4 堆，其他擴張點各 3～4 堆
   const B={x:420,y:1850},E={x:2980,y:420};
-  spawn('base',0,B.x,B.y);
+  const myBase=spawn('base',0,B.x,B.y);
   [[-150,-170],[-180,-85],[-190,0],[-170,85]].forEach(([dx,dy])=>spawn('scrap',-1,B.x+dx,B.y+dy));
   [[150,170],[180,85],[190,0],[170,-85]].forEach(([dx,dy])=>spawn('scrap',-1,E.x+dx,E.y+dy));
   const field=(cx,cy,n)=>{for(let i=0;i<n;i++){const a=-Math.PI/2+i*Math.PI/2.6;spawn('scrap',-1,cx+Math.cos(a)*95,cy+Math.sin(a)*95);}};
   field(1180,1640,4);field(2230,620,4);field(1700,1130,3);field(560,480,3);field(2860,1840,3);
   if(sandbox){
-    spawn('barracks',0,690,1750);spawn('airbase',0,680,1980);spawn('turret',0,610,1590);
+    myBase.lvl=3;myBase.exp=4;spawn('barracks',0,690,1750);spawn('airbase',0,680,1980);spawn('turret',0,610,1590);spawn('lab',0,450,1590);
+    [...PROD.barracks,...PROD.airbase].forEach(t=>up.skill[t]=0);
     if(FAC==='scav'){spawn('pump',0,340,2080);spawn('pump',0,560,2110);}
     if(FAC==='vine'){const l=spawn('lung',0,450,2080);l.age=40;}
     if(FAC==='mech'){for(let i=0;i<3;i++)spawn('drone',0,470+i*20,1760,{order:{k:'drone'}});spawn('pack',0,520,1760,{ptype:'turret'});}
@@ -401,11 +463,15 @@ function reset(){
   const nW=sandbox?5:3;
   for(let i=0;i<nW;i++){const w=spawn('worker',0,B.x-30+i*16,B.y-100);gather([w],nearestRes(w));}
   const g=(t,n,x,y,team)=>{for(let i=0;i<n;i++)spawn(t,team,x+(i%4)*34,y+Math.floor(i/4)*34);};
-  if(sandbox){g('inf',6,830,1790,0);g('rocket',3,830,1870,0);g('tank',2,930,1870,0);g('mech',1,970,1800,0);
-    g('fighter',2,810,1620,0);g('bomber',1,880,1620,0);g('scout',1,930,1620,0);}
+  if(sandbox){
+    if(FAC==='scav'){g('rifle',6,830,1790,0);g('srocket',3,830,1870,0);g('heavy',2,930,1870,0);g('biker',2,980,1800,0);g('walker',1,1040,1870,0);
+      g('turbo',2,810,1620,0);g('glider',1,880,1620,0);g('divebomber',1,930,1620,0);g('jetpack',1,990,1620,0);}
+    else{g('inf',6,830,1790,0);g('rocket',3,830,1870,0);g('tank',2,930,1870,0);g('mech',1,970,1800,0);
+      g('fighter',2,810,1620,0);g('bomber',1,880,1620,0);g('scout',1,930,1620,0);}
+  }
   spawn('base',1,E.x,E.y);spawn('turret',1,2760,580);spawn('turret',1,3020,720);
-  g('inf',4,2700,700,1);
-  if(sandbox){g('tank',1,2780,760,1);g('inf',3,1800,1250,1);g('rocket',1,1840,1290,1);g('fighter',2,2300,1300,1);}
+  g('rifle',4,2700,700,1);
+  if(sandbox){g('heavy',1,2780,760,1);g('rifle',3,1800,1250,1);g('srocket',1,1840,1290,1);g('turbo',2,2300,1300,1);}
   updConn(false);
   cam.x=650;cam.y=1800;cam.z=defZ();clampCam();
   closePop();refreshAll(true);
@@ -460,7 +526,8 @@ const selEnts=()=>[...sel].map(id=>byId.get(id)).filter(Boolean);
 const own=f=>ents.filter(e=>e.team===0&&f(e));
 function nearestRes(e){let b=null,bd=1e9;for(const r of ents)if(r.cat==='res'&&r.amt>0){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
 function nearestDrop(e){let b=null,bd=1e9;for(const r of ents)if(r.team===e.team&&working(r)&&(r.type==='base'||r.type==='depot')){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
-function popCap(){let c=0;for(const b of ents)if(b.team===0&&b.type==='base'&&b.built)c+=20+20*b.lvl;return Math.min(200,c);}
+function popCap(){let c=0;for(const b of ents)if(b.team===0&&b.type==='base'&&b.built){c+=10;for(let i=0;i<(b.exp||0);i++)c+=EXPAND.add[i];}return Math.min(200,c);}
+const techLv=()=>Math.max(0,...ents.filter(b=>b.team===0&&b.type==='base'&&b.built).map(b=>b.lvl));
 function popUsed(){let u=0;for(const e of ents)if(e.team===0){if(isU(e))u+=TY[e.type].pop||0;for(const q of e.q)if(q.kind==='unit')u+=TY[q.type].pop||0;}return u;}
 const afford=c=>res.s>=c[0]&&res.g>=c[1];
 function pay(c){if(!afford(c)){toast(res.s<c[0]?'廢料不足':'輻能氣不足','bad');return false;}res.s-=c[0];res.g-=c[1];return true;}
@@ -527,7 +594,8 @@ function moveCmd(es,w,amove,label){
   markers.push({x:w.x,y:w.y,t:0,c:amove?C.enemy:label==='retreat'?C.accent:C.ok});
 }
 function attackCmd(es,t){
-  const atk=es.filter(e=>TY[e.type].dmg);
+  const atk=es.filter(e=>canHit(e,t));
+  if(atk.length<es.filter(e=>TY[e.type].dmg).length)toast(isAirLike(t)?'部分單位無法對空':'部分單位無法攻擊地面','bad');
   atk.forEach(e=>{if(e.sieged&&hyp(e,t)>TY[e.type].range*1.8)return;e.bq=[];e.order={k:'attack',tid:t.id};});
   markers.push({x:t.x,y:t.y,t:0,c:C.enemy,r:t.r});
 }
@@ -558,7 +626,7 @@ function armyAttack(es){
     toast('停火');gesture('<b>再點攻擊</b> → 停火');refreshCmds(true);return;
   }
   let n=0;
-  es.forEach(e=>{if(!isCombat(e))return;const t=acquire(e,TY[e.type].range*(e.sieged?1.8:1)+150);if(t){e.order={k:'attack',tid:t.id,auto:true};n++;}});
+  es.forEach(e=>{if(!isCombat(e)||!TY[e.type].dmg)return;const t=acquire(e,TY[e.type].range*(e.sieged?1.8:1)+150);if(t){e.order={k:'attack',tid:t.id,auto:true};n++;}});
   mode={k:'attack'};
   toast(n?'開火：'+n+' 個單位攻擊附近敵人。點敵人可集火，點地面就移動':'開火：附近沒有敵人。點敵人集火，點地面移動','mode');
   gesture('<b>點攻擊</b> → 開火');refreshCmds(true);
@@ -626,7 +694,7 @@ function produce(es,type){
   bs.sort((a,b)=>a.q.length-b.q.length);const b=bs[0];
   if(b.q.length>=5){toast('佇列已滿（5）','bad');return false;}
   const T=TY[type];
-  if(popUsed()+T.pop>popCap()){toast('人口不足，請升級'+FACS[FAC].base,'bad');return false;}
+  if(popUsed()+T.pop>popCap()){toast('人口不足，請在'+FACS[FAC].base+'擴建','bad');return false;}
   if(!pay(T.cost))return false;
   b.q.push({kind:'unit',type,t:0,total:T.pt});return true;
 }
@@ -639,70 +707,113 @@ function queueBuilding(es,type){
   toast('主堡開始生成 '+T.name+'（建築一次只能做一棟）');
   gesture('<b>建造</b> → 主堡內生成 '+T.name);
 }
-const UPG={
-  base:{cost:[150,100],t:20,name:'主堡升級（人口 +20）',max:b=>b.lvl>=3,lv:b=>b.lvl},
-  barracks:{cost:[100,100],t:18,name:'地面部隊攻擊 +20%',max:()=>up.ground>=3,lv:()=>up.ground,team:'ground'},
-  airbase:{cost:[100,100],t:18,name:'空軍攻擊 +20%',max:()=>up.air>=3,lv:()=>up.air,team:'air'},
-  turret:{cost:[75,0],t:8,name:'砲塔攻擊 +30%',max:b=>b.lvl>=3,lv:b=>b.lvl},
-  depot:{cost:[100,50],t:15,name:'廢料採集量 +1',max:()=>up.gather>=2,lv:()=>up.gather,team:'gather'},
-};
-function upgrade(es){
-  const U=UPG[es[0].type];
+const catOf=t=>t==='barracks'?'ground':'air';
+// 下一級的花費與時間；max=已到上限
+function nextUp(b,kind){
+  if(kind==='upg'){const lv=b.lvl;return lv>=4?{max:true}:{cost:BASE_UP.cost[lv-1],t:BASE_UP.t[lv-1],lv};}
+  if(kind==='exp'){const n=b.exp||0;return n>=4?{max:true}:{cost:EXPAND.cost[n],t:EXPAND.t[n],lv:n};}
+  if(kind==='pupg'){const lv=up[catOf(b.type)];return lv>=3?{max:true}:{cost:PROD_UP.cost[lv],t:PROD_UP.t[lv],lv};}
+  if(kind==='tupg'){return b.lvl>=3?{max:true}:{cost:TUR_UP.cost,t:TUR_UP.t,lv:b.lvl};}
+}
+function queueUp(es,kind){
   const bs=es.filter(working);
-  const busy=b=>b.q.some(q=>q.kind==='upg');
+  if(!bs.length){toast('建築無法運作','bad');return;}
   let b;
-  if(U.team){
-    if(ents.some(x=>x.team===0&&x.type===es[0].type&&busy(x))){toast('升級進行中','bad');return;}
-    if(U.max()){toast('已達最高等級','bad');return;}
+  if(kind==='pupg'){
+    const cat=catOf(bs[0].type);
+    if(ents.some(x=>x.team===0&&x.q.some(q=>q.kind==='pupg'&&q.cat===cat))){toast('強化進行中','bad');return;}
     b=bs.sort((a,c)=>a.q.length-c.q.length)[0];
   }else{
-    b=bs.find(x=>!busy(x)&&!U.max(x));
-    if(!b){toast(bs.some(busy)?'升級進行中':bs.length?'已達最高等級':'建築無法運作','bad');return;}
+    b=bs.find(x=>!x.q.some(q=>q.kind===kind)&&!nextUp(x,kind).max);
+    if(!b){toast(bs.some(x=>x.q.some(q=>q.kind===kind))?'進行中':'已達上限','bad');return;}
   }
-  if(!b){toast('建築無法運作','bad');return;}
-  if(b.q.length>=5){toast('佇列已滿','bad');return;}
-  if(!pay(U.cost))return;
-  b.q.push({kind:'upg',t:0,total:U.t});toast('開始：'+U.name);
+  const n=nextUp(b,kind);
+  if(n.max){toast('已達上限','bad');return;}
+  if(b.q.length>=5){toast('佇列已滿（5）','bad');return;}
+  if(!pay(n.cost))return;
+  b.q.push({kind,t:0,total:n.t,cat:kind==='pupg'?catOf(b.type):undefined});
+  toast(kind==='upg'?'開始升級 Lv'+(b.lvl+1)+'：解鎖'+BASE_UP.unlock[b.lvl-1]:kind==='exp'?'開始擴建：人口上限 +'+EXPAND.add[b.exp||0]:kind==='pupg'?'開始強化 Lv'+(n.lv+1)+'：'+PROD_UP.eff[n.lv]:'開始升級砲塔');
+}
+// 佇列項目在圖示上用的字
+const qch=q=>q.kind==='unit'?TY[q.type].ch:q.kind==='upg'?'升':q.kind==='exp'?'擴':q.kind==='pupg'?'強':q.kind==='tupg'?'升':q.kind==='skill'?SK[TY[q.type].sk[q.opt]].name[0]:TY[q.type].ch;
+function research(t,opt){
+  if(up.skill[t]!==undefined){toast(TY[t].name+' 已經學會技能','bad');return;}
+  if(up.pend[t]!==undefined){toast(TY[t].name+' 的技能研究中','bad');return;}
+  const lab=selKind().es.filter(working).sort((a,c)=>a.q.length-c.q.length)[0];
+  if(!lab){toast('研究所無法運作','bad');return;}
+  if(lab.q.length>=5){toast('佇列已滿（5）','bad');return;}
+  if(!pay(SKILL_COST))return;
+  up.pend[t]=opt;lab.q.push({kind:'skill',type:t,opt,t:0,total:SKILL_T});
+  toast('開始研究 '+TY[t].name+'「'+SK[TY[t].sk[opt]].name+'」，另一個選項會鎖住');
+}
+function renderResearch(p){
+  p.innerHTML='<div class="ptitle">研究所・每個兵種技能二選一</div>';
+  const g=document.createElement('div');g.className='rgrid';
+  [...PROD.barracks,...PROD.airbase].forEach(t=>{const T=TY[t];
+    const u=document.createElement('div');u.className='runit';u.innerHTML='<span class="bi rd">'+T.ch+'</span>';u.title=T.name;g.appendChild(u);
+    T.sk.forEach((sid,opt)=>{const S=SK[sid],ch=up.skill[t],pd=up.pend[t];
+      let cls='rtile',sub='<i class="ico s"></i>'+SKILL_COST[0]+'<i class="ico g"></i>'+SKILL_COST[1];
+      if(ch===opt){cls+=' done';sub='已學會';}
+      else if(ch!==undefined||(pd!==undefined&&pd!==opt)){cls+=' lock';sub='已選另一個';}
+      else if(pd===opt){cls+=' run';sub='研究中';}
+      const b=document.createElement('button');b.className=cls;b.setAttribute('aria-label',T.name+' '+S.name);
+      b.innerHTML='<b>'+S.name+'</b><span>'+sub+'</span>';
+      bindPress(b,()=>{research(t,opt);renderResearch(p);placePop();});g.appendChild(b);});
+  });
+  p.appendChild(g);
 }
 function repair(es){const b=es.find(x=>x.hp<x.maxHp);if(!b){toast('不需要維修');return;}if(!pay([25,0]))return;b.hp=Math.min(b.maxHp,b.hp+b.maxHp*.3);toast(nm(b)+' 已維修 30%');}
 function demolish(es){const b=es[0];const c=TY[b.type].cost||[0,0];res.s+=Math.floor(c[0]/2);res.g+=Math.floor(c[1]/2);b.hp=0;b.quiet=true;toast('已拆除 '+nm(b)+'，退回 50%');}
 function cancelBuild(es){es.forEach(b=>{const c=TY[b.type].cost;res.s+=Math.floor(c[0]*.75);res.g+=Math.floor(c[1]*.75);b.hp=0;b.quiet=true;});toast('已取消，退回 75%');}
 
+const skillOf=t=>up.skill[t]!==undefined&&TY[t].sk?SK[TY[t].sk[up.skill[t]]]:null;
 function castSkill(type){
   const us=selEnts().filter(e=>e.type===type);
-  const S=TY[type].skill;
+  const S=skillOf(type);if(!S)return;
   const ready=us.filter(e=>e.scd<=0);
   if(!ready.length){toast(S.name+' 冷卻中','bad');return;}
-  if(S.id==='siege'){
+  if(S.fx==='siege'){
     const to=!ready.every(e=>e.sieged);
     ready.forEach(e=>{e.sieged=to;e.order={k:'idle'};e.scd=S.cd;});
-    toast(to?'坦克架設：射程 +80%、不能移動':'坦克收起，可以移動');return;
+    toast(to?TY[type].name+'架設：射程 +80%、不能移動':TY[type].name+'收起，可以移動');return;
   }
+  const hitAll=(x,y,r,d,src)=>{booms.push({x,y,r,t:0,c:C.accent});for(const o of ents)if(o.team===1&&o.hp>0&&!(S.groundOnly&&isAirLike(o))&&Math.hypot(o.x-x,o.y-y)<r+o.r)dmg(o,d,src);};
   ready.forEach(e=>{
     e.scd=S.cd;
-    if(S.id==='stim')e.stim=5;
-    else if(S.id==='salvo')e.salvo=1;
-    else if(S.id==='shield'){e.shield=60;e.shieldT=6;}
-    else if(S.id==='boost')e.boost=4;
-    else if(S.id==='bomb'){booms.push({x:e.x,y:e.y,r:85,t:0,c:C.accent});for(const o of ents)if(o.team===1&&o.cat!=='air'&&hyp(o,e)<85+o.r)dmg(o,45,e);}
+    if(S.fx==='haste')e.hasteT=S.dur;
+    else if(S.fx==='speed'){e.spdT=S.dur;e.spdMult=S.mult;}
+    else if(S.fx==='dmgup'){e.dmgT=S.dur;e.dmgMult=S.mult;}
+    else if(S.fx==='next')e.salvo=1;
+    else if(S.fx==='shield'){e.shield=S.amt;e.shieldT=S.dur;}
+    else if(S.fx==='mark'){booms.push({x:e.x,y:e.y,r:S.r,t:0,c:C.gas});for(const o of ents)if(o.team===1&&hyp(o,e)<S.r+o.r)o.markT=S.dur;}
+    else if(S.fx==='aoeSelf')hitAll(e.x,e.y,S.r,S.dmg,e);
+    else{const t=acquire(e,(TY[e.type].range||100)+80,true);const c=t||{x:e.x+Math.cos(e.ang||0)*80,y:e.y+Math.sin(e.ang||0)*80};
+      if(S.fx==='aoe')hitAll(c.x,c.y,S.r,S.dmg,e);
+      else if(S.fx==='aoe3')[[0,0],[-45,30],[45,30]].forEach(([dx,dy])=>hitAll(c.x+dx,c.y+dy,S.r,S.dmg,e));}
   });
   toast(TY[type].name+' 使用「'+S.name+'」×'+ready.length);
 }
 
 // ---------- 戰鬥 ----------
-function acquire(e,rad){let b=null,bd=1e9;for(const o of ents){if(o.team<0||o.team===e.team||o.hp<=0)continue;const d=hyp(e,o)-o.r;if(d<rad&&d<bd){bd=d;b=o;}}return b;}
-function dmgMult(e){if(e.team!==0)return 1;if(e.cat==='ground')return 1+.2*up.ground;if(e.cat==='air')return 1+.2*up.air;return 1;}
+// 能不能打：空中目標要 aa，地面目標要 ag
+const canHit=(e,o)=>{const T=TY[e.type];if(!T.dmg)return false;return isAirLike(o)?!!T.aa:T.ag!==0;};
+function acquire(e,rad,any){let b=null,bd=1e9;for(const o of ents){if(o.team<0||o.team===e.team||o.hp<=0)continue;if(!any&&!canHit(e,o))continue;const d=hyp(e,o)-o.r;if(d<rad&&d<bd){bd=d;b=o;}}return b;}
+// 生產基地強化：Lv1 攻擊、Lv2 防禦、Lv3 攻防再加
+const atkLv=l=>(l>=1)+(l>=3),defLv=l=>(l>=2)+(l>=3);
+function dmgMult(e){if(e.team!==0)return 1;if(e.cat==='ground')return 1+.15*atkLv(up.ground);if(e.cat==='air')return 1+.15*atkLv(up.air);return 1;}
+function defMult(t){if(t.team!==0)return 1;if(t.cat==='ground')return 1-.1*defLv(up.ground);if(t.cat==='air')return 1-.1*defLv(up.air);return 1;}
 function dmg(t,d,src){
+  d*=defMult(t)*(t.markT>0?1.25:1);
   if(t.shield>0){const a=Math.min(t.shield,d);t.shield-=a;d-=a;}
   t.hp-=d;
   if(t.team===0&&src&&src.team===1)pushEvent(t.x,t.y,nm(t)+' 遭受攻擊','atk');
-  if(src&&isCombat(t)&&(t.order.k==='idle'||t.order.k==='hold')&&!t.sieged&&src.hp>0)t.order={k:'attack',tid:src.id,auto:true,home:{x:t.x,y:t.y}};
+  if(src&&isCombat(t)&&canHit(t,src)&&(t.order.k==='idle'||t.order.k==='hold')&&!t.sieged&&src.hp>0)t.order={k:'attack',tid:src.id,auto:true,home:{x:t.x,y:t.y}};
 }
 function fire(e,t){
   const T=TY[e.type];
-  const d=T.dmg*dmgMult(e)*(e.sieged?1.5:1)*(e.type==='turret'?1+.3*(e.lvl-1):1);
-  e.cd=T.cd*(e.stim>0?.6:1);
-  shots.push({x1:e.x,y1:e.y-(e.cat==='air'?6:0),x2:t.x,y2:t.y,t:0,c:e.team===0?C.ally:C.enemy,w:e.type==='tank'||e.type==='rocket'?3:1.5});
+  const d=T.dmg*dmgMult(e)*(e.sieged?1.5:1)*(e.type==='turret'?1+.3*(e.lvl-1):1)*(e.dmgT>0?e.dmgMult:1);
+  e.cd=T.cd*(e.hasteT>0?.6:1);
+  shots.push({x1:e.x,y1:e.y-(e.cat==='air'?6:0),x2:t.x,y2:t.y,t:0,c:e.team===0?C.ally:C.enemy,w:['tank','rocket','srocket','walker','glider'].includes(e.type)?3:1.5});
   if(e.salvo>0){e.salvo=0;booms.push({x:t.x,y:t.y,r:70,t:0,c:C.accent});for(const o of ents)if(o.team===t.team&&hyp(o,t)<70+o.r)dmg(o,25,e);}
   dmg(t,d,e);
 }
@@ -804,9 +915,9 @@ function finishBuild(b){
 function updUnit(e,dt){
   const T=TY[e.type];
   e.cd=Math.max(0,e.cd-dt);e.scd=Math.max(0,e.scd-dt);
-  if(e.stim>0)e.stim-=dt;if(e.boost>0)e.boost-=dt;
+  for(const k of ['hasteT','spdT','dmgT','markT'])if(e[k]>0)e[k]-=dt;
   if(e.shieldT>0){e.shieldT-=dt;if(e.shieldT<=0)e.shield=0;}
-  const spd=(T.speed||0)*(e.stim>0?1.5:1)*(e.boost>0?2:1);
+  const spd=(T.speed||0)*(e.hasteT>0?1.3:1)*(e.spdT>0?e.spdMult:1);
   const rng=(T.range||0)*(e.sieged?1.8:1);
   const o=e.order;
   if(isB(e)){
@@ -817,10 +928,10 @@ function updUnit(e,dt){
   switch(o.k){
     case 'hold':break;
     case 'idle':{
-      if(isCombat(e)){const t=acquire(e,rng+(e.team?120:40));if(t){if(e.sieged){if(hyp(e,t)-t.r<=rng)e.order={k:'attack',tid:t.id,auto:true};}else e.order={k:'attack',tid:t.id,auto:true,home:{x:e.x,y:e.y}};}}
+      if(isCombat(e)&&T.dmg){const t=acquire(e,rng+(e.team?120:40));if(t){if(e.sieged){if(hyp(e,t)-t.r<=rng)e.order={k:'attack',tid:t.id,auto:true};}else e.order={k:'attack',tid:t.id,auto:true,home:{x:e.x,y:e.y}};}}
       break;}
     case 'move':{
-      if(o.amove&&isCombat(e)){const t=acquire(e,rng+60);if(t){e.order={k:'attack',tid:t.id,auto:true,resume:o};break;}}
+      if(o.amove&&isCombat(e)&&T.dmg){const t=acquire(e,rng+60);if(t){e.order={k:'attack',tid:t.id,auto:true,resume:o};break;}}
       if(goTo(e,o.x,o.y,spd,dt))e.order={k:'idle'};
       break;}
     case 'attack':{
@@ -897,7 +1008,15 @@ function updBuilding(b,dt){
   q.t+=dt;
   if(q.t<q.total)return;
   b.q.shift();
-  if(q.kind==='upg'){const U=UPG[b.type];if(U.team)up[U.team]++;else b.lvl++;toast('完成：'+U.name);pushEvent(b.x,b.y,'升級完成','done');return;}
+  if(q.kind!=='unit'){
+    let msg='';
+    if(q.kind==='upg'){b.lvl++;msg=FACS[FAC].base+' 升到 Lv'+b.lvl+'：解鎖'+BASE_UP.unlock[b.lvl-2];}
+    else if(q.kind==='exp'){const a=EXPAND.add[b.exp||0];b.exp=(b.exp||0)+1;msg='擴建完成：人口上限 +'+a;}
+    else if(q.kind==='pupg'){up[q.cat]++;msg=(q.cat==='ground'?'地面':'空軍')+'強化 Lv'+up[q.cat]+'：'+PROD_UP.eff[up[q.cat]-1];}
+    else if(q.kind==='tupg'){b.lvl++;msg='砲塔升到 Lv'+b.lvl;}
+    else if(q.kind==='skill'){up.skill[q.type]=q.opt;delete up.pend[q.type];msg=TY[q.type].name+' 學會「'+SK[TY[q.type].sk[q.opt]].name+'」';}
+    toast(msg);pushEvent(b.x,b.y,msg,'done');refreshAll(true);return;
+  }
   const tx=b.rally?b.rally.x:b.x+80,ty=b.rally?b.rally.y:b.y+60;
   const a=Math.atan2(ty-b.y,tx-b.x);
   const u=spawn(q.type,0,b.x+Math.cos(a)*(b.r+16),b.y+Math.sin(a)*(b.r+16));
@@ -952,7 +1071,7 @@ function step(dt){
   for(const e of ents){if(isB(e))updBuilding(e,dt);if(e.cat!=='res')updUnit(e,dt);}
   separate();gasTick(dt);
   let dead=false;
-  ents=ents.filter(e=>{const gone=e.cat==='res'?e.amt<=0:e.hp<=0;if(gone){byId.delete(e.id);if(isB(e)||e.cat==='res')navDirty=true;if(sel.delete(e.id))dead=true;if(e.hp<=0&&e.cat!=='res'&&!e.quiet)booms.push({x:e.x,y:e.y,r:e.r*1.6,t:0,c:e.team===0?C.ally:C.enemy});}return!gone;});
+  ents=ents.filter(e=>{const gone=e.cat==='res'?e.amt<=0:e.hp<=0;if(gone){byId.delete(e.id);if(isB(e)||e.cat==='res')navDirty=true;if(e.q)e.q.forEach(q=>{if(q.kind==='skill')delete up.pend[q.type];});if(sel.delete(e.id))dead=true;if(e.hp<=0&&e.cat!=='res'&&!e.quiet)booms.push({x:e.x,y:e.y,r:e.r*1.6,t:0,c:e.team===0?C.ally:C.enemy});}return!gone;});
   slots=slots.map(s=>s.filter(id=>byId.has(id)));
   pend=pend.filter(p=>{const u=byId.get(p.uid);if(!u)return false;
     if(u.type==='pack')return u.order.k==='deploy'||u.order.k==='deploying';
@@ -964,9 +1083,17 @@ function step(dt){
   markers.forEach(m=>m.t+=dt);markers=markers.filter(m=>m.t<.6);
   shots.forEach(s=>s.t+=dt);shots=shots.filter(s=>s.t<.12);
   booms.forEach(b=>b.t+=dt);booms=booms.filter(b=>b.t<.45);
-  if(SET.waves==='on'){waveT-=dt;if(waveT<=0){waveT=110;
-    for(let i=0;i<4;i++){const u=spawn(i<3?'inf':'rocket',1,2800+i*24,640);u.order={k:'move',x:470,y:1800,amove:true};}
-    pushEvent(2820,640,'敵軍來襲','wave');toast('敵軍來襲：從右上方往你的'+FACS[FAC].base+'前進','bad');}}
+  if(SET.waves==='on'&&waveN<WAVES.length){waveT-=dt;if(waveT<=0){spawnWave(waveN);waveN++;waveT=120;}}
+  if(waveN>=WAVES.length&&!waveDone&&!ents.some(e=>e.wave&&e.hp>0)){waveDone=true;toast('10 波拾荒者攻勢全部擊退！');}
+}
+
+function spawnWave(i){
+  let k=0;
+  Object.entries(WAVES[i]).forEach(([t,n])=>{for(let j=0;j<n;j++){
+    const u=spawn(t,1,2760+(k%6)*32,600+Math.floor(k/6)*32,{wave:i+1});
+    u.order={k:'move',x:470+(Math.random()-.5)*120,y:1800+(Math.random()-.5)*120,amove:true};k++;}});
+  pushEvent(2840,660,'第 '+(i+1)+' 波拾荒者攻勢','wave');
+  toast('第 '+(i+1)+'/'+WAVES.length+' 波拾荒者攻勢來襲（'+k+' 個單位）','bad');
 }
 
 // ---------- 繪圖 ----------
@@ -988,7 +1115,7 @@ function drawQueue(b,list,by,col,loop){
   for(let i=0;i<n;i++){const q=list[i],x=x0+i*sp;
     ctx.fillStyle='rgba(0,0,0,.65)';ctx.beginPath();ctx.arc(x,y,8.5,0,7);ctx.fill();
     if(i===0){ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(x,y,8.5,-Math.PI/2,-Math.PI/2+Math.PI*2*q.t/q.total);ctx.stroke();}
-    label(q.kind==='upg'?'升':TY[q.type].ch,x,y,10,i===0?C.fg:C.dim);}
+    label(qch(q),x,y,10,i===0?C.fg:C.dim);}
   let tx=x0+n*sp;
   if(list.length>n){label('+'+(list.length-n),tx,y,10,C.dim);tx+=16;}
   if(loop)label('∞',tx,y,11,C.accent);
@@ -1058,7 +1185,7 @@ function draw(){
   for(const e of ents){if(e.cat!=='worker'&&e.cat!=='ground')continue;if(e.type==='drone')continue;const col=e.team===0?C.ally:C.enemy;
     if(e.sieged){ctx.strokeStyle='rgba(227,169,72,.22)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(e.x,e.y,TY.tank.range*1.8,0,7);ctx.stroke();
       ctx.strokeStyle=C.accent;ctx.lineWidth=3;for(let i=0;i<4;i++){const a=Math.PI/4+i*Math.PI/2;ctx.beginPath();ctx.moveTo(e.x+Math.cos(a)*e.r,e.y+Math.sin(a)*e.r);ctx.lineTo(e.x+Math.cos(a)*(e.r+8),e.y+Math.sin(a)*(e.r+8));ctx.stroke();}}
-    ctx.fillStyle='#1d221b';ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.stim>0?4:2.5;ctx.stroke();
+    ctx.fillStyle='#1d221b';ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.hasteT>0||e.spdT>0||e.dmgT>0?4:2.5;ctx.stroke();if(e.markT>0){ctx.strokeStyle=C.gas;ctx.lineWidth=2;ctx.beginPath();ctx.arc(e.x,e.y,e.r+6,0,7);ctx.stroke();}
     label(TY[e.type].ch,e.x,e.y,e.r*1.05,col);
     if(e.carry){ctx.fillStyle=C.scrap;ctx.beginPath();ctx.arc(e.x+e.r*.7,e.y-e.r*.7,4,0,7);ctx.fill();}
     if(e.shield>0){ctx.strokeStyle='rgba(111,227,210,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(e.x,e.y,e.r+5,0,7);ctx.stroke();}
@@ -1069,7 +1196,7 @@ function draw(){
   for(const e of ents){if(!isAirLike(e))continue;const col=e.team===0?C.ally:C.enemy;
     if(e.type==='drone'){ctx.save();ctx.translate(e.x,e.y-6);ctx.rotate(time*2);ctx.fillStyle='#1d2430';ctx.strokeStyle=C.gas;ctx.lineWidth=2;ctx.beginPath();ctx.rect(-e.r*.7,-e.r*.7,e.r*1.4,e.r*1.4);ctx.fill();ctx.stroke();ctx.restore();continue;}
     ctx.save();ctx.translate(e.x,e.y-6);ctx.rotate(e.ang||0);ctx.beginPath();ctx.moveTo(e.r*1.25,0);ctx.lineTo(-e.r*.85,e.r*.95);ctx.lineTo(-e.r*.35,0);ctx.lineTo(-e.r*.85,-e.r*.95);ctx.closePath();
-    ctx.fillStyle='#1d221b';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.boost>0?4:2.5;ctx.stroke();ctx.restore();
+    ctx.fillStyle='#1d221b';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.hasteT>0||e.spdT>0||e.dmgT>0?4:2.5;ctx.stroke();ctx.restore();
     label(TY[e.type].ch,e.x-2,e.y-6,e.r*.8,col);}
   for(const e of ents){if(e.cat==='res')continue;if(sel.has(e.id)||e.hp<e.maxHp)hpBar(e);}
   // 放置中的半透明建築
@@ -1437,17 +1564,21 @@ function cmdDefs(){
     defs.push({ch:'展',lb:'部署',onTap:()=>{const p=selEnts().find(e=>e.order.k!=='deploy'&&e.order.k!=='deploying')||selEnts()[0];if(!p)return;enterPlace(p.ptype,p.id);gesture('<b>部署</b> → 選位置後確認，會自己移動過去展開');}});
   }else if(k.k==='army'){
     defs.push({ch:'攻',lb:'攻擊',on:()=>isFiring(selEnts()),onTap:()=>armyAttack(selEnts()),label:()=>isFiring(selEnts())?'開火中':'攻擊'});
-    const types=[...new Set(k.es.map(e=>e.type))].filter(t=>TY[t]&&TY[t].skill);
-    skills=types.map(t=>{const S=TY[t].skill;return{ch:S.name.slice(0,1),lb:S.name,type:t,onTap:()=>castSkill(t),
+    const types=[...new Set(k.es.map(e=>e.type))].filter(t=>skillOf(t));
+    skills=types.map(t=>{const S=skillOf(t);return{ch:S.name.slice(0,1),lb:S.name,type:t,onTap:()=>castSkill(t),
       cdf:()=>{const us=selEnts().filter(e=>e.type===t);if(!us.length)return 0;return Math.min(...us.map(e=>e.scd))/S.cd;},
-      on:()=>S.id==='siege'&&selEnts().filter(e=>e.type===t).every(e=>e.sieged)};});
+      on:()=>S.fx==='siege'&&selEnts().filter(e=>e.type===t).every(e=>e.sieged)};});
   }else{
     const bs=k.es,t=k.type;
     if(bs.every(b=>!b.built)){defs.push({ch:'✕',lb:FAC==='vine'?'取消生長':'取消建造',onTap:()=>cancelBuild(bs)});return{k,defs,skills};}
     (PROD[t]||[]).forEach(u=>defs.push({ch:TY[u].ch,lb:TY[u].name,cost:TY[u].cost,unit:u,cdf:()=>qRem(q=>q.kind==='unit'&&q.type===u),onTap:()=>{if(produce(selKind().es,u))gesture('<b>點</b> → 生產 '+TY[u].name+'（長按可循環生產）');},
       onLong:()=>{const es=selKind().es.filter(b=>b.built);const all=es.every(b=>b.loop===u);es.forEach(b=>b.loop=all?null:u);toast(all?'已關閉循環生產':'循環生產 '+TY[u].name+'：佇列空了就自動補');gesture('<b>長按</b> → 循環生產');}}));
     if(t==='base'&&FAC!=='scav')defs.push({ch:FAC==='vine'?'長':'建',lb:FAC==='vine'?'生長':'建造',cdf:()=>FAC==='mech'?qRem(()=>true,'bq'):0,onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,p=>renderBuild(p,FAC==='vine'?'place':'queue'));}});
-    if(UPG[t])defs.push({ch:'升',lb:'升級',cost:UPG[t].cost,upg:true,cdf:()=>qRem(q=>q.kind==='upg'),onTap:()=>upgrade(selKind().es)});
+    const upBtn=(kind,ch,lb)=>{const n=nextUp(bs[0],kind);defs.push({ch,lb,cost:n.max?null:n.cost,up:kind,cdf:()=>qRem(q=>q.kind===kind),onTap:()=>queueUp(selKind().es,kind)});};
+    if(t==='base'){upBtn('upg','升','升級');upBtn('exp','擴','擴建');}
+    if(t==='barracks'||t==='airbase')upBtn('pupg','強','強化');
+    if(t==='turret')upBtn('tupg','升','升級');
+    if(t==='lab')defs.push({ch:'研',lb:'研究',cdf:()=>qRem(q=>q.kind==='skill'),onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,renderResearch);}});
     if(t==='base')defs.push({ch:'召',lb:'閒置回採',onTap:()=>{const idle=own(e=>e.type==='worker'&&e.order.k==='idle');idle.forEach(w=>gather([w],nearestRes(w)));toast(idle.length?idle.length+' 個閒置工兵回去採集':'沒有閒置工兵');}});
     if(t==='turret'||t==='depot'||t==='pump'||t==='lung'){defs.push({ch:'修',lb:'維修',cost:[25,0],onTap:()=>repair(selKind().es)});defs.push({ch:'拆',lb:'拆除',onTap:()=>demolish(selKind().es)});}
   }
@@ -1479,9 +1610,11 @@ function renderBuild(p,how){
   p.innerHTML='<div class="ptitle">'+(FAC==='vine'?'生長':FAC==='mech'?'主堡生成・一次一棟':'建造')+'</div>';
   const g=document.createElement('div');g.className='bgrid';
   BUILDS[FAC].forEach(t=>{const T=TY[t];
-    const b=document.createElement('button');b.className='btile'+(afford(T.cost)?'':' poor');b.setAttribute('aria-label',tName(t));
-    b.innerHTML='<span class="bi">'+tCh(t)+'</span><span class="bc"><i class="ico s"></i>'+T.cost[0]+(T.cost[1]?'<i class="ico g"></i>'+T.cost[1]:'')+'</span>';
+    const req=BUILD_REQ[t]||0,locked=techLv()<req;
+    const b=document.createElement('button');b.className='btile'+(afford(T.cost)&&!locked?'':' poor');b.setAttribute('aria-label',tName(t));
+    b.innerHTML='<span class="bi">'+tCh(t)+'</span><span class="bc">'+(locked?'需 Lv'+req:'<i class="ico s"></i>'+T.cost[0]+(T.cost[1]?'<i class="ico g"></i>'+T.cost[1]:''))+'</span>';
     bindPress(b,()=>{
+      if(locked){toast(tName(t)+'：需要'+FACS[FAC].base+' Lv'+req,'bad');return;}
       if(!afford(T.cost)){toast(tName(t)+'：'+(res.s<T.cost[0]?'廢料不足':'輻能氣不足'),'bad');return;}
       closePop();
       if(how==='queue'){queueBuilding(selKind().es,t);return;}
@@ -1492,7 +1625,7 @@ function renderBuild(p,how){
 }
 function refreshCmds(force){
   const d=cmdDefs();
-  const sig=(d.place?'place:'+mode.type:'')+'|'+d.k.k+'|'+(d.k.type||'')+'|'+d.defs.map(x=>x.lb).join(',')+'|'+d.skills.map(x=>x.lb).join(',');
+  const sig=(d.place?'place:'+mode.type:'')+'|'+d.k.k+'|'+(d.k.type||'')+'|'+d.defs.map(x=>x.lb+(x.cost?x.cost.join('/'):'')).join(',')+'|'+d.skills.map(x=>x.lb).join(',');
   if(force||sig!==cmdSig){
     cmdSig=sig;
     const box=$('#cmdArea');box.innerHTML='';
@@ -1510,7 +1643,7 @@ function updCmds(){
     if(d.place&&mode&&mode.k==='place')b.classList.toggle('off',!placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null).ok||(FAC!=='mech'&&!afford(TY[mode.type].cost)));
     let badge='';
     if(d.unit&&k.k==='bld'){const n=k.es.reduce((s,x)=>s+x.q.filter(q=>q.type===d.unit).length,0);const lp=k.es.some(x=>x.loop===d.unit);badge=(lp?'∞':'')+(n?n:'');}
-    if(d.upg&&k.k==='bld'){const U=UPG[k.type];const lv=U.team?U.lv():Math.min(...k.es.map(x=>x.lvl));badge='Lv'+(U.team?lv+1:lv);}
+    if(d.up&&k.k==='bld'){const b0=k.es[0];badge=d.up==='upg'?'Lv'+b0.lvl:d.up==='exp'?(b0.exp||0)+'/4':d.up==='pupg'?'Lv'+up[catOf(k.type)]:'Lv'+b0.lvl;}
     b.querySelector('.badge').textContent=badge;
     if(d.label)b.querySelector('.lb').textContent=d.label();
     // 指針式倒數：從 12 點鐘方向順時針掃過，未完成的部分蓋暗
@@ -1527,7 +1660,7 @@ function renderSelInfo(){
   const k=selKind();
   if(k.k==='bld'){const b=k.es;const off=b.some(x=>FAC==='vine'&&!x.conn);
     const items=[];
-    b.forEach(x=>{x.q.forEach((q,i)=>items.push({ch:q.kind==='upg'?'升':TY[q.type].ch,p:i===0?q.t/q.total:-1}));
+    b.forEach(x=>{x.q.forEach((q,i)=>items.push({ch:qch(q),p:i===0?q.t/q.total:-1}));
       x.bq.forEach((q,i)=>items.push({ch:TY[q.type].ch,p:i===0?q.t/q.total:-1,bld:true}));});
     items.sort((a,c)=>c.p-a.p);
     const chips=items.slice(0,8).map(it=>'<span class="qc'+(it.p>=0?' run':'')+(it.bld?' qb':'')+'"'+(it.p>=0?' style="background:conic-gradient(var(--accent) 0 '+(it.p*100).toFixed(1)+'%,rgba(255,255,255,.1) '+(it.p*100).toFixed(1)+'% 100%)"':'')+'><i>'+it.ch+'</i></span>').join('')+(items.length>8?' +'+(items.length-8):'');
@@ -1536,6 +1669,8 @@ function renderSelInfo(){
   el.innerHTML=[...m].map(([t,n])=>'<b>'+keyName(t)+'</b>×'+n).join('・');
 }
 function refreshHUD(){
+  const mmss=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
+  $('#wave').textContent=SET.waves!=='on'?'':waveN<WAVES.length?'第 '+(waveN+1)+'/'+WAVES.length+' 波 '+mmss(Math.max(0,waveT)):waveDone?'攻勢已擊退':'第 '+WAVES.length+' 波進行中';
   $('#rs').textContent=Math.floor(res.s);$('#rg').textContent=Math.floor(res.g);$('#rgr').textContent=' +'+gasRate.toFixed(1)+'/s';
   const pu=popUsed(),pc=popCap();$('#pu').textContent=pu;$('#pc').textContent=pc;$('#popEl').classList.toggle('full',pu>=pc);
   const idle=own(e=>e.type==='worker'&&e.order.k==='idle').length;
@@ -1607,7 +1742,7 @@ function frame(){
 }
 window.addEventListener('resize',()=>{resize();placePop();refreshCmds(true);});
 buildCats();buildSlots();renderFacPick();resize();reset();
-window.__rts={get ents(){return ents},get mode(){return mode},get res(){return res},get sel(){return [...sel]},get cam(){return cam},w2s};
+window.__rts={get ents(){return ents},get mode(){return mode},get res(){return res},get sel(){return [...sel]},get cam(){return cam},get up(){return up},w2s,canHit,popCap,techLv,skipWave(){waveT=0;},fast(){for(const b of ents)if(b.q)b.q.forEach(q=>q.total=Math.min(q.total,.3));}};
 requestAnimationFrame(frame);
 })();
 </script>
