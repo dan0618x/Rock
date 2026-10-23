@@ -1,0 +1,9 @@
+{
+  "name": "手機 RTS 操作原型",
+  "short_name": "RTS 原型",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#10120f",
+  "theme_color": "#10120f"
+}

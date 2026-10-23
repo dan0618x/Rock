@@ -1,0 +1,1616 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#10120f">
+<link rel="manifest" href="manifest.webmanifest">
+<title>手機 RTS 操作原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Noto+Sans+TC:wght@500;700&display=swap">
+<style>
+/* 版面：全螢幕戰場畫布 + HUD（左上小地圖與三鈕、右上資源、右中事件、左下分類、中下編隊、右下指令與技能直列）。單一深色戰場風格。 */
+:root{
+  --bg:#10120f;
+  --panel:rgba(24,26,21,.84);
+  --panel-solid:#1c1f19;
+  --btn-top:#2c3027; --btn-bot:#1a1c17;
+  --line:rgba(236,226,196,.16);
+  --fg:#ece6d6; --dim:#a29c8a;
+  --accent:#e3a948;
+  --ally:#62b4ff; --enemy:#ff6e5c;
+  --scrap:#c9a172; --gas:#cfe06a;
+  --flesh:#d98f86;
+  --ok:#86d67f; --bad:#ff7b6b;
+  --b:clamp(40px,6vw,56px);
+  --s:clamp(38px,5.4vw,52px);
+  --k:calc(var(--b) * .86);
+  --big:calc(var(--b) * 1.4);
+  --ui:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --num:"Chakra Petch",ui-monospace,"SF Mono",monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--fg);overscroll-behavior:none}
+body{font-family:var(--ui);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+#app{position:fixed;inset:0;overflow:hidden}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.hud{position:absolute;pointer-events:none}
+.hud > *{pointer-events:auto}
+#msg > *{pointer-events:none}
+button{font:inherit;color:inherit;touch-action:none}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 左上：小地圖 + 三鈕 */
+#tl{top:calc(env(safe-area-inset-top,0px) + 10px);left:max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+#mm{display:block;width:clamp(120px,19vw,190px);aspect-ratio:3/2;max-width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel-solid);touch-action:none}
+#tlBtns{display:flex;gap:6px}
+.mini{width:36px;height:36px;border-radius:9px;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;position:relative;cursor:pointer;font-weight:700;font-size:14px;padding:0}
+.bdg{position:absolute;top:-5px;right:-5px;background:var(--accent);color:#231a08;border-radius:9px;font-size:10px;min-width:17px;height:17px;display:grid;place-items:center;font-family:var(--num);padding:0 3px}
+
+/* 右上資源列 */
+#topR{top:calc(env(safe-area-inset-top,0px) + 10px);right:max(16px,env(safe-area-inset-right,0px));display:flex;gap:6px;align-items:center}
+.resbox{display:flex;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-family:var(--num);font-size:14px;font-variant-numeric:tabular-nums}
+.res{display:flex;align-items:center;gap:6px}
+.ico{width:11px;height:11px;flex:none}
+.ico.s{background:var(--scrap);clip-path:polygon(0 30%,40% 0,100% 20%,85% 100%,15% 90%)}
+.ico.g{background:var(--gas);border-radius:50%;box-shadow:0 0 6px var(--gas)}
+.pop{color:var(--dim)} .pop b{color:var(--fg);font-weight:600}
+.pop.full b{color:var(--bad)}
+.icobtn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;font-size:16px;cursor:pointer;padding:0}
+
+/* 右中：事件 */
+#evWrap{top:32%;right:max(16px,env(safe-area-inset-right,0px))}
+#evBtn{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:pointer;padding:0;gap:0}
+#evBtn .ch{font-size:15px;font-weight:700;line-height:1}
+#evBtn .lb{font-size:9px;color:var(--dim);line-height:1.2}
+#evBtn.hot{border-color:var(--accent);box-shadow:0 0 0 2px rgba(227,169,72,.25)}
+
+/* 中上提示 */
+#msg{top:calc(env(safe-area-inset-top,0px) + 54px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none;max-width:min(50vw,520px)}
+#toast,#gest{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;transition:opacity .3s}
+#toast.bad{border-color:var(--bad);color:#ffd2cb}
+#toast.mode{border-color:var(--accent);color:#ffe7bd}
+#gest{font-size:11.5px;color:var(--dim);padding:3px 12px}
+#gest b{color:var(--accent);font-weight:700}
+
+/* 底部三區 */
+#bottom{left:0;right:0;bottom:0;padding:0 max(16px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:10px;pointer-events:none}
+#bottom > *{pointer-events:auto}
+#cats{justify-self:start;display:grid;grid-template-columns:repeat(2,var(--b));gap:6px}
+#mid{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+#selInfo{font-size:12px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#selInfo b{color:var(--fg)}
+#slots{display:flex;gap:5px}
+/* 右下圓形配置：大圓鈕在角落，其他按鈕沿四分之一圓弧排開 */
+#cmdArea{justify-self:end;position:relative;width:var(--big);height:var(--big)}
+#cmdArea .btn{border-radius:50%;position:absolute}
+#cmdArea .btn.prim{left:0;top:0;width:var(--big);height:var(--big)}
+#cmdArea .btn.prim .ch{font-size:calc(var(--big) * .32)}
+#cmdArea .btn.prim .lb{font-size:11px}
+#cmdArea .btn.sec{left:0;top:0;width:var(--k);height:var(--k)}
+#cmdArea .btn.sec .ch{font-size:calc(var(--k) * .36)}
+#cmdArea .btn.sec .lb{font-size:9px}
+#cmdArea .btn .cost{position:static;font-size:9px}
+#cmdArea .btn.hascost .lb{display:none}
+#cmdArea .btn .badge{left:50%;top:3px;transform:translateX(-50%)}
+
+.btn{width:var(--b);height:var(--b);border-radius:12px;border:1px solid var(--line);background:linear-gradient(var(--btn-top),var(--btn-bot));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;position:relative;cursor:pointer;padding:0;overflow:hidden;transition:transform .08s,border-color .15s}
+.btn .ch{font-size:calc(var(--b) * .36);font-weight:700;line-height:1}
+.btn .lb{font-size:10px;color:var(--dim);line-height:1.1;white-space:nowrap}
+.btn .cost{position:absolute;top:2px;right:4px;font-family:var(--num);font-size:9px;color:var(--dim);line-height:1}
+.btn .badge{position:absolute;top:2px;left:4px;font-family:var(--num);font-size:10px;font-weight:600;color:var(--accent);line-height:1}
+.btn .cdov{position:absolute;inset:0;pointer-events:none}
+.qc{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.1);margin-left:3px;vertical-align:middle}
+.qc i{font-style:normal;font-size:11px;font-weight:700;color:var(--dim);width:15px;height:15px;border-radius:50%;background:var(--panel-solid);display:grid;place-items:center;line-height:1}
+.qc.run i{color:var(--fg)}
+.qc.qb i{color:var(--ally)}
+.btn.down{transform:scale(.92)}
+.btn.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.btn.off{opacity:.4}
+.btn.poor .cost{color:var(--bad)}
+.btn.skill{width:var(--k);height:var(--k);border-radius:50%}
+.btn.skill .ch{font-size:calc(var(--k) * .36)}
+.btn.skill .lb{font-size:9px}
+.btn.swap{border-color:var(--accent)}
+.btn.swap .ch{color:var(--accent)}
+.btn.go{background:linear-gradient(#3b4a2c,#26301d);border-color:var(--ok)}
+.btn.go .ch{color:var(--ok)}
+.btn.cat.open{border-color:var(--accent)}
+.btn.placeholder{opacity:.35;pointer-events:none}
+
+.slot{width:var(--s);height:var(--s);border-radius:10px;border:1px dashed var(--line);background:rgba(24,26,21,.6);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:pointer;padding:0;transition:transform .08s}
+.slot.full{border-style:solid;background:linear-gradient(var(--btn-top),var(--btn-bot))}
+.slot .num{position:absolute;top:2px;left:5px;font-family:var(--num);font-size:10px;color:var(--dim)}
+.slot .ch{font-size:calc(var(--s) * .34);font-weight:700;color:var(--ally);line-height:1}
+.slot .cnt{font-family:var(--num);font-size:11px;color:var(--fg);line-height:1.2}
+.slot .plus{color:var(--dim);font-size:18px}
+.slot.active{border-color:var(--ally);box-shadow:inset 0 0 0 1px var(--ally)}
+.slot.down{transform:scale(.92)}
+.shake{animation:shake .3s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+
+/* 彈出選單 */
+#pop{position:absolute;z-index:20;background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);min-width:160px;max-width:min(360px,90vw);max-height:62vh;overflow:auto}
+.ptitle{font-size:11px;color:var(--dim);letter-spacing:.06em;padding:2px 6px 6px}
+.prow{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:0;border-radius:8px;background:transparent;text-align:left;cursor:pointer;font-size:14px}
+.prow.down{background:rgba(255,255,255,.07)}
+.prow .ic{width:28px;height:28px;border-radius:50%;border:2px solid var(--ally);display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--ally);flex:none}
+.prow .ic.sq{border-radius:6px}
+.prow .n{margin-left:auto;font-family:var(--num);color:var(--dim)}
+.prow .cost{margin-left:auto;font-family:var(--num);font-size:12px;color:var(--dim);white-space:nowrap}
+.prow.dis{opacity:.4;pointer-events:none}
+#pop,#pop button{touch-action:pan-y}
+/* 建造選單：兩欄圖示，只顯示建築圖與花費 */
+.bgrid{display:grid;grid-template-columns:repeat(2,64px);gap:6px}
+.btile{width:64px;height:64px;border-radius:12px;border:1px solid var(--line);background:linear-gradient(var(--btn-top),var(--btn-bot));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:0;cursor:pointer;transition:transform .08s}
+.btile .bi{width:30px;height:30px;border:2px solid var(--ally);border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:15px;color:var(--ally)}
+.btile .bc{display:flex;align-items:center;gap:3px;font-family:var(--num);font-size:10.5px;color:var(--fg);line-height:1}
+.btile .bc .ico{width:8px;height:8px}
+.btile .bc .ico.g{margin-left:3px}
+.btile.poor{opacity:.45}
+.btile.down{transform:scale(.94)}
+.btile.cur{border-color:var(--ally);box-shadow:inset 0 0 0 1px var(--ally)}
+.btile .bi.rd{border-radius:50%}
+.btile .bi.pk{border-style:dashed}
+.btile .bc em{font-style:normal;color:var(--accent);margin-left:4px;font-size:10px;font-weight:700}
+.prow.cur{background:rgba(98,180,255,.14);box-shadow:inset 3px 0 0 var(--ally)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 8px;max-width:300px}
+.chip{width:34px;height:34px;border-radius:50%;border:2px solid var(--ally);background:var(--btn-bot);display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--ally);position:relative;cursor:pointer;padding:0}
+.chip i{position:absolute;left:4px;right:4px;bottom:3px;height:3px;border-radius:2px;background:var(--ok)}
+.prow-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px}
+.pbtn{flex:1 1 auto;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--btn-top);font-size:13px;cursor:pointer;white-space:nowrap}
+.pbtn.warn{color:#ffc9c1}
+.pbtn.pri{flex-basis:100%;border-color:var(--accent);color:#ffe7bd;background:rgba(227,169,72,.12)}
+.phint{font-size:11px;color:var(--dim);padding:6px 4px 0;max-width:280px;line-height:1.5}
+
+/* 疊層：說明與設定 */
+.sheet{position:absolute;inset:0;z-index:40;background:rgba(8,9,7,.74);display:grid;place-items:center;padding:calc(env(safe-area-inset-top,0px) + 12px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 12px) max(16px,env(safe-area-inset-left,0px))}
+.card{background:var(--panel-solid);border:1px solid var(--line);border-radius:16px;padding:18px 20px;max-width:680px;width:100%;max-height:100%;overflow:auto;touch-action:pan-y}
+.card h1{font-size:20px;margin:0 0 4px;text-wrap:balance}
+.card h2{font-size:12px;letter-spacing:.08em;color:var(--accent);margin:14px 0 6px;font-weight:700}
+.card p{margin:0;color:var(--dim);font-size:13px;line-height:1.6}
+.card ul{margin:0;padding-left:18px;font-size:13px;line-height:1.7}
+.card li b{color:var(--accent);font-weight:700}
+.rot{display:none;margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid var(--accent);color:#ffe2ad;font-size:13px}
+@media (orientation:portrait){.rot{display:block}}
+.facs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fac{padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--btn-bot);text-align:left;cursor:pointer;min-width:0}
+.fac b{display:block;font-size:14px;margin-bottom:3px}
+.fac span{display:block;font-size:11.5px;color:var(--dim);line-height:1.45}
+.fac.sel{border-color:var(--accent);background:rgba(227,169,72,.12)}
+.gobtn{margin-top:14px;padding:10px 22px;border-radius:10px;border:0;background:var(--accent);color:#231a08;font-weight:700;font-size:15px;cursor:pointer}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.setrow .k{font-size:13px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1 1 140px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--btn-bot);font-size:12.5px;cursor:pointer;text-align:left}
+.seg button.sel{border-color:var(--accent);background:rgba(227,169,72,.14);color:#ffe7bd}
+.seg button .tag{font-size:10.5px;color:var(--dim);display:block}
+.row2{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap}
+.ghost{padding:9px 16px;border-radius:10px;border:1px solid var(--line);background:transparent;cursor:pointer;font-size:14px}
+@media (max-width:560px){.facs{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){.shake{animation:none}.btn,.slot{transition:none}}
+</style>
+</head>
+<body>
+
+
+<div id="app">
+  <canvas id="cv" aria-label="戰場"></canvas>
+
+  <div class="hud" id="tl">
+    <canvas id="mm" aria-label="小地圖"></canvas>
+    <div id="tlBtns">
+      <button class="mini" id="btnClear" aria-label="取消選取">✕</button>
+      <button class="mini" id="btnArmy" aria-label="全部部隊">全</button>
+      <button class="mini" id="btnIdle" aria-label="閒置工兵">閒</button>
+    </div>
+  </div>
+
+  <div class="hud" id="msg"><div id="toast" style="opacity:0"></div><div id="gest" style="opacity:0"></div></div>
+
+  <div class="hud" id="topR">
+    <div class="resbox">
+      <span class="res" title="廢料"><i class="ico s"></i><span id="rs">0</span></span>
+      <span class="res" title="輻能氣"><i class="ico g"></i><span id="rg">0</span><small id="rgr" style="color:var(--dim);font-size:11px"></small></span>
+      <span class="pop" id="popEl">人口 <b id="pu">0</b>/<span id="pc">0</span></span>
+    </div>
+    <button class="icobtn" id="btnFs" aria-label="全螢幕">⛶</button>
+    <button class="icobtn" id="btnSet" aria-label="設定">⚙</button>
+    <button class="icobtn" id="btnHelp" aria-label="說明">?</button>
+  </div>
+
+  <div class="hud" id="evWrap"><button id="evBtn" aria-label="跳到最新事件"><span class="ch">!</span><span class="lb">事件</span></button></div>
+
+  <div class="hud" id="bottom">
+    <div id="cats"></div>
+    <div id="mid"><div id="selInfo"></div><div id="slots"></div></div>
+    <div id="cmdArea"></div>
+  </div>
+
+  <div id="pop" hidden></div>
+
+  <div class="sheet" id="intro">
+    <div class="card">
+      <h1>手機 RTS 操作原型</h1>
+      <div class="rot">建議把手機橫放，這個介面是為橫屏設計的。</div>
+      <h2>選擇種族</h2>
+      <div class="facs" id="facPick"></div>
+      <div class="row2">
+        <button class="ghost" id="btnIntroHelp">操作說明</button>
+        <button class="gobtn" id="btnGo" style="margin-top:0">開始試玩</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="helpSheet" hidden>
+    <div class="card">
+      <h1>操作說明</h1>
+      <p>操作手感測試，不是完整遊戲。兵種和數值都是暫定，三族目前只有建造方式和輻能氣採集方式不同。</p>
+      <h2>操作</h2>
+      <ul>
+        <li><b>選取跳鏡頭</b>：左下分類和中下編隊選取時，鏡頭跳過去；單位分散時，再點一次跳下一群</li>
+        <li><b>放置模式</b>：半透明建築，單指移動建築、雙指移動鏡頭或縮放，右下按確認／連續／取消</li>
+        <li><b>右側「事件」</b>：跳到最近 5 秒內的事件，快速連按在事件之間切換；持續被攻擊的事件會一直保留</li>
+        <li><b>編隊規則</b>：戰鬥部隊不限制（地面、空軍可混編）；工兵跟工兵、建築只跟同種建築</li>
+        <li><b>右下圓形按鈕</b>：大圓鈕是主要動作，其他按鈕圍在旁邊。部隊只有「攻擊」：點攻擊開火、點地面移動、再點攻擊停火，用來走位甩打</li>
+        <li><b>技能</b>：圍在攻擊鈕旁，5 個以內全部顯示，6 個以上才出現「換」</li>
+        <li><b>地圖選取</b>：點單位就選它（有選取時也一樣）；對單位連點兩下選畫面內同種；按住 0.5 秒圈選（有選取時也可以，點一下仍是移動）</li>
+      </ul>
+      <h2>開局</h2>
+      <p>預設是正式開局：1 座主堡、3 個工兵。每座主堡最多 8 個工兵採廢料。右上 ⚙ 可以換成測試開局（已有建築和部隊）。</p>
+      <h2>三族建造方式</h2>
+      <ul>
+        <li><b>拾荒者</b>：選工兵 → 建造 → 放置 → 確認，工兵走過去蓋。輻能氣靠抽氣塔，太近會互搶</li>
+        <li><b>蔓生族</b>：選母體 → 生長 → 放置（要在臍帶範圍內）→ 確認，建築從網路長出去；斷線就變灰停擺。輻能氣靠吸氣巢，越久越多</li>
+        <li><b>遺械</b>：選主堡 → 建造 → 建築在主堡內生成 → 變成單位出現在主堡旁 → 選它 → 部署 → 確認，自己移動過去展開。輻能氣靠主堡生產的無人機</li>
+      </ul>
+      <div class="row2">
+        <span></span>
+        <button class="gobtn" id="btnHelpClose" style="margin-top:0">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="setSheet" hidden>
+    <div class="card">
+      <h1>設定</h1>
+      <p>換種族會重置戰場；其他規則切換後立即生效，可以邊玩邊比較。</p>
+      <div id="setList"></div>
+      <div class="row2">
+        <button class="ghost" id="btnReset">重置戰場</button>
+        <button class="gobtn" id="btnSetClose" style="margin-top:0">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(()=>{
+'use strict';
+const W=3400,H=2260,UMB=300,PUMP_R=110,MINE_CAP=8;
+const $=s=>document.querySelector(s);
+const cv=$('#cv'),ctx=cv.getContext('2d');
+const mm=$('#mm'),mctx=mm.getContext('2d');
+const css=getComputedStyle(document.documentElement);
+const C={};
+['ally','enemy','scrap','gas','flesh','accent','ok','bad','fg','dim'].forEach(k=>C[k]=css.getPropertyValue('--'+k).trim());
+
+// ---------- 種族 ----------
+const FACS={
+  scav:{name:'拾荒者聯盟',base:'主堡',baseCh:'堡',shape:'sq',desc:'工兵到現場蓋建築；抽氣塔採輻能氣，要分散蓋。'},
+  vine:{name:'蔓生族',base:'母體',baseCh:'母',shape:'blob',desc:'建築從母體用臍帶長出去，不需工兵；吸氣巢越久產量越高。'},
+  mech:{name:'遺械',base:'主堡',baseCh:'核',shape:'hex',desc:'建築在主堡生成後變成單位，移動到定點展開；無人機自動採氣。'},
+};
+
+// ---------- 單位資料（暫定） ----------
+const TY={
+  base:    {cat:'building',name:'主堡',ch:'堡',hp:1500,r:58,cost:[400,0],bt:30},
+  depot:   {cat:'building',name:'採集場',ch:'採',hp:600,r:34,cost:[100,0],bt:12},
+  barracks:{cat:'building',name:'地面基地',ch:'地',hp:900,r:44,cost:[150,0],bt:16},
+  airbase: {cat:'building',name:'空軍基地',ch:'空',hp:800,r:44,cost:[150,100],bt:20},
+  turret:  {cat:'building',name:'砲塔',ch:'砲',hp:500,r:26,cost:[100,0],bt:10,range:210,dmg:12,cd:1},
+  pump:    {cat:'building',name:'抽氣塔',ch:'抽',hp:300,r:22,cost:[75,0],bt:10},
+  lung:    {cat:'building',name:'吸氣巢',ch:'吸',hp:350,r:24,cost:[75,0],bt:12},
+  worker:  {cat:'worker',name:'工兵',ch:'工',hp:40,r:12,speed:85,range:24,dmg:3,cd:1,cost:[50,0],pt:6,pop:1},
+  drone:   {cat:'worker',name:'無人機',ch:'氣',hp:30,r:10,speed:95,cost:[50,0],pt:5,pop:1},
+  pack:    {cat:'pack',name:'待部署',ch:'',hp:1,r:1,speed:55},
+  inf:     {cat:'ground',name:'步兵',ch:'步',hp:55,r:14,speed:80,range:110,dmg:6,cd:.8,cost:[50,0],pt:5,pop:1,skill:{id:'stim',name:'興奮',cd:15}},
+  rocket:  {cat:'ground',name:'火箭兵',ch:'火',hp:50,r:14,speed:72,range:150,dmg:10,cd:1.4,cost:[75,25],pt:7,pop:1,skill:{id:'salvo',name:'齊射',cd:12}},
+  tank:    {cat:'ground',name:'坦克',ch:'坦',hp:170,r:20,speed:60,range:170,dmg:18,cd:1.8,cost:[150,75],pt:12,pop:3,skill:{id:'siege',name:'架設',cd:1.5}},
+  mech:    {cat:'ground',name:'機甲',ch:'機',hp:210,r:19,speed:66,range:50,dmg:16,cd:1,cost:[125,50],pt:10,pop:2,skill:{id:'shield',name:'護盾',cd:18}},
+  scout:   {cat:'air',name:'偵察機',ch:'偵',hp:60,r:14,speed:140,range:100,dmg:4,cd:1,cost:[50,25],pt:6,pop:1},
+  fighter: {cat:'air',name:'戰鬥機',ch:'戰',hp:90,r:16,speed:115,range:130,dmg:9,cd:.9,cost:[100,50],pt:9,pop:2,skill:{id:'boost',name:'加力',cd:12}},
+  bomber:  {cat:'air',name:'轟炸機',ch:'轟',hp:150,r:20,speed:80,range:70,dmg:14,cd:2,cost:[150,100],pt:12,pop:3,skill:{id:'bomb',name:'轟炸',cd:12}},
+  scrap:   {cat:'res',name:'廢料堆',ch:'',r:22,amt:1500},
+};
+const PROD={base:['worker'],barracks:['inf','rocket','tank','mech'],airbase:['scout','fighter','bomber']};
+const BUILDS={scav:['barracks','airbase','turret','pump','base'],vine:['barracks','airbase','turret','lung','base'],mech:['barracks','airbase','turret','base']};
+const CATS=[['building','建','建築'],['worker','工','工兵'],['ground','地','地面'],['air','空','空軍']];
+
+// ---------- 設定 ----------
+const SETDEF=[
+  ['faction','種族（切換會重置戰場）',[['scav','拾荒者聯盟',''],['vine','蔓生族',''],['mech','遺械','']]],
+  ['snap','有選取時拖曳鏡頭，放開後',[['back','部隊離開畫面才回到部隊','你的原設計'],['stay','一律停在原處','']]],
+  ['autoGather','新生產的工兵',[['off','待命','你的原設計'],['on','自動去採廢料','建議']]],
+  ['start','開局（切換會重置戰場）',[['formal','正式開局：1 堡 3 工兵',''],['sandbox','測試開局：已有建築和部隊','']]],
+  ['waves','敵軍定期進攻（測反應用）',[['on','開',''],['off','關','']]],
+];
+const SET={};
+SETDEF.forEach(([k,,o])=>SET[k]=o[0][0]);
+try{const s=JSON.parse(localStorage.getItem('rtsProtoSet2')||'{}');for(const k in s)if(k in SET)SET[k]=s[k];}catch(e){}
+function saveSet(){try{localStorage.setItem('rtsProtoSet2',JSON.stringify(SET));}catch(e){}}
+let FAC=SET.faction;
+
+// ---------- 狀態 ----------
+let ents=[],byId=new Map(),nextId=1,sel=new Set(),slots=[[],[],[],[],[]];
+let res={s:0,g:0},gasRate=0,up={ground:0,air:0,gather:0},mode=null;
+let markers=[],shots=[],booms=[],patches=[],pend=[],events=[],waveT=100,time=0,connT=0,skillPage=0;
+let cam={x:520,y:1180,z:1};
+let VW=0,VH=0,DPR=1;
+
+const isB=e=>e.cat==='building', isU=e=>e.cat==='worker'||e.cat==='ground'||e.cat==='air';
+const isMob=e=>isU(e)||e.cat==='pack';
+const isCombat=e=>e.cat==='ground'||e.cat==='air';
+const isAirLike=e=>e.cat==='air'||e.type==='drone';
+const hyp=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const now=()=>performance.now();
+const nm=e=>{if(e.type==='base'&&e.team===0)return FACS[FAC].base;if(e.type==='pack')return'待部署・'+TY[e.ptype].name;return TY[e.type].name;};
+const chOf=e=>{if(e.type==='base'&&e.team===0)return FACS[FAC].baseCh;if(e.type==='pack')return TY[e.ptype].ch;return TY[e.type].ch;};
+const tName=t=>t==='base'?FACS[FAC].base:TY[t].name;
+const tCh=t=>t==='base'?FACS[FAC].baseCh:TY[t].ch;
+const bt=t=>TY[t].bt*(FAC==='vine'?1.4:FAC==='mech'?.8:1);
+const working=b=>b.built&&(b.team!==0||FAC!=='vine'||b.conn!==false);
+
+function spawn(type,team,x,y,o){
+  const T=TY[type];
+  const e=Object.assign({id:nextId++,type,team,x,y,cat:T.cat,r:T.r,hp:T.hp||1,maxHp:T.hp||1,cd:0,scd:0,order:{k:'idle'},built:true,q:[],bq:[],lvl:1,ang:team?Math.PI:0,conn:true},o||{});
+  if(T.cat==='res')e.amt=T.amt;
+  if(T.cat==='building'||T.cat==='res')navDirty=true;
+  if(type==='pack'){const P=TY[e.ptype];e.r=Math.round(P.r*.6);e.hp=e.maxHp=Math.round(P.hp*.5);}
+  ents.push(e);byId.set(e.id,e);return e;
+}
+
+function reset(){
+  FAC=SET.faction;PROD.base=FAC==='mech'?['worker','drone']:['worker'];
+  ents=[];byId=new Map();nextId=1;sel=new Set();slots=[[],[],[],[],[]];
+  const sandbox=SET.start==='sandbox';
+  res=sandbox?{s:500,g:150}:{s:250,g:50};up={ground:0,air:0,gather:0};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
+  waveT=sandbox?100:240;time=0;skillPage=0;
+  patches=[];let sd=7;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
+  for(let i=0;i<140;i++)patches.push({x:rnd()*W,y:rnd()*H,r:60+rnd()*180,d:rnd()<.55});
+  // 廢料區：主基地 4 堆，其他擴張點各 3～4 堆
+  const B={x:420,y:1850},E={x:2980,y:420};
+  spawn('base',0,B.x,B.y);
+  [[-150,-170],[-180,-85],[-190,0],[-170,85]].forEach(([dx,dy])=>spawn('scrap',-1,B.x+dx,B.y+dy));
+  [[150,170],[180,85],[190,0],[170,-85]].forEach(([dx,dy])=>spawn('scrap',-1,E.x+dx,E.y+dy));
+  const field=(cx,cy,n)=>{for(let i=0;i<n;i++){const a=-Math.PI/2+i*Math.PI/2.6;spawn('scrap',-1,cx+Math.cos(a)*95,cy+Math.sin(a)*95);}};
+  field(1180,1640,4);field(2230,620,4);field(1700,1130,3);field(560,480,3);field(2860,1840,3);
+  if(sandbox){
+    spawn('barracks',0,690,1750);spawn('airbase',0,680,1980);spawn('turret',0,610,1590);
+    if(FAC==='scav'){spawn('pump',0,340,2080);spawn('pump',0,560,2110);}
+    if(FAC==='vine'){const l=spawn('lung',0,450,2080);l.age=40;}
+    if(FAC==='mech'){for(let i=0;i<3;i++)spawn('drone',0,470+i*20,1760,{order:{k:'drone'}});spawn('pack',0,520,1760,{ptype:'turret'});}
+  }
+  const nW=sandbox?5:3;
+  for(let i=0;i<nW;i++){const w=spawn('worker',0,B.x-30+i*16,B.y-100);gather([w],nearestRes(w));}
+  const g=(t,n,x,y,team)=>{for(let i=0;i<n;i++)spawn(t,team,x+(i%4)*34,y+Math.floor(i/4)*34);};
+  if(sandbox){g('inf',6,830,1790,0);g('rocket',3,830,1870,0);g('tank',2,930,1870,0);g('mech',1,970,1800,0);
+    g('fighter',2,810,1620,0);g('bomber',1,880,1620,0);g('scout',1,930,1620,0);}
+  spawn('base',1,E.x,E.y);spawn('turret',1,2760,580);spawn('turret',1,3020,720);
+  g('inf',4,2700,700,1);
+  if(sandbox){g('tank',1,2780,760,1);g('inf',3,1800,1250,1);g('rocket',1,1840,1290,1);g('fighter',2,2300,1300,1);}
+  updConn(false);
+  cam.x=650;cam.y=1800;cam.z=defZ();clampCam();
+  closePop();refreshAll(true);
+}
+
+// ---------- 鏡頭 ----------
+const minZ=()=>Math.min(VW/W,VH/H);
+const maxZ=()=>1.8;
+const defZ=()=>Math.max(minZ(),Math.min(1.3,VH/560));
+// 鏡頭可以超出地圖邊緣，超出量＝該側介面按鈕佔的寬度，地圖最外圍的東西才能拉到按鈕外面
+const PAD={l:0,r:0,t:0,b:0};
+function measurePad(){
+  const ar=$('#app').getBoundingClientRect(),cat=$('#cats').getBoundingClientRect(),tl=$('#tl').getBoundingClientRect(),cmd=$('#cmdArea').getBoundingClientRect();
+  PAD.l=cat.right-ar.left+8;PAD.r=ar.right-cmd.left+40;PAD.t=tl.bottom-ar.top+8;PAD.b=ar.bottom-cat.top+8;
+}
+function clampCam(){
+  cam.z=Math.max(minZ(),Math.min(maxZ(),cam.z));
+  const z=cam.z;
+  const x0=(VW/2-PAD.l)/z,x1=W-(VW/2-PAD.r)/z,y0=(VH/2-PAD.t)/z,y1=H-(VH/2-PAD.b)/z;
+  cam.x=x0>x1?(x0+x1)/2:Math.max(x0,Math.min(x1,cam.x));
+  cam.y=y0>y1?(y0+y1)/2:Math.max(y0,Math.min(y1,cam.y));
+}
+const s2w=(sx,sy)=>({x:(sx-VW/2)/cam.z+cam.x,y:(sy-VH/2)/cam.z+cam.y});
+const w2s=(x,y)=>({x:(x-cam.x)*cam.z+VW/2,y:(y-cam.y)*cam.z+VH/2});
+let camAnim=null;
+function camTo(x,y,ms){camAnim={fx:cam.x,fy:cam.y,tx:x,ty:y,t0:now(),ms:ms||180};}
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  const r=$('#app').getBoundingClientRect();VW=r.width;VH=r.height;
+  cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);
+  const mr=mm.getBoundingClientRect();mm.width=Math.round(mr.width*DPR);mm.height=Math.round(mr.height*DPR);
+  measurePad();clampCam();
+}
+// 選取時跳鏡頭：分散時依群組大小排序，重複點同一項跳下一群
+let jumpState={key:'',i:0,t:0};
+function clusters(list){
+  const cl=[];
+  list.forEach(e=>{const c=cl.find(g=>g.some(o=>hyp(o,e)<380));if(c)c.push(e);else cl.push([e]);});
+  return cl.sort((a,b)=>b.length-a.length);
+}
+function jumpTo(list,key){
+  if(!list.length)return'';
+  const cl=clusters(list);let i=0;
+  if(jumpState.key===key&&now()-jumpState.t<6000)i=(jumpState.i+1)%cl.length;
+  jumpState={key,i,t:now()};
+  const c=centroid(cl[i]);camTo(c.x,c.y,220);
+  return cl.length>1?'（第 '+(i+1)+'/'+cl.length+' 群，再點一次跳下一群）':'';
+}
+
+// ---------- 小工具 ----------
+const selEnts=()=>[...sel].map(id=>byId.get(id)).filter(Boolean);
+const own=f=>ents.filter(e=>e.team===0&&f(e));
+function nearestRes(e){let b=null,bd=1e9;for(const r of ents)if(r.cat==='res'&&r.amt>0){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
+function nearestDrop(e){let b=null,bd=1e9;for(const r of ents)if(r.team===e.team&&working(r)&&(r.type==='base'||r.type==='depot')){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
+function popCap(){let c=0;for(const b of ents)if(b.team===0&&b.type==='base'&&b.built)c+=20+20*b.lvl;return Math.min(200,c);}
+function popUsed(){let u=0;for(const e of ents)if(e.team===0){if(isU(e))u+=TY[e.type].pop||0;for(const q of e.q)if(q.kind==='unit')u+=TY[q.type].pop||0;}return u;}
+const afford=c=>res.s>=c[0]&&res.g>=c[1];
+function pay(c){if(!afford(c)){toast(res.s<c[0]?'廢料不足':'輻能氣不足','bad');return false;}res.s-=c[0];res.g-=c[1];return true;}
+function countBy(list){const m=new Map();list.forEach(e=>{const k=e.type==='pack'?'pack:'+e.ptype:e.type;m.set(k,(m.get(k)||0)+1);});return m;}
+const keyName=k=>k.startsWith('pack:')?'待部署・'+TY[k.slice(5)].name:tName(k);
+function centroid(list){let x=0,y=0;list.forEach(e=>{x+=e.x;y+=e.y;});return{x:x/list.length,y:y/list.length};}
+
+// ---------- 訊息與事件 ----------
+let toastT=0,gestT=0;
+function toast(t,kind){const el=$('#toast');el.textContent=t;el.className=kind||'';el.style.opacity=1;toastT=kind==='mode'?1e9:2.2;}
+function gesture(h){const el=$('#gest');el.innerHTML='手勢：'+h;el.style.opacity=1;gestT=2.6;}
+// 事件只保留 EV_LIFE 秒；同一處持續被攻擊會刷新時間，不會在交戰中消失
+const EV_LIFE=5;
+function pushEvent(x,y,txt,kind){
+  if(kind==='atk'){const l=events.find(e=>e.kind==='atk'&&Math.hypot(e.x-x,e.y-y)<400);if(l){l.t=time;l.x=x;l.y=y;return;}}
+  events.push({x,y,txt,kind,t:time});
+}
+let evCur=0,evPressT=0;
+function eventJump(){
+  if(!events.length){toast('目前沒有事件');return;}
+  const list=events.slice().reverse();
+  evCur=now()-evPressT<3000?(evCur+1)%list.length:0;
+  evPressT=now();
+  const e=list[evCur];
+  camTo(e.x,e.y,220);markers.push({x:e.x,y:e.y,t:0,c:C.accent,r:30});
+  gesture('<b>事件</b> '+(evCur+1)+'/'+list.length+'：'+e.txt+(list.length>1?'（快速連按切換）':''));
+}
+
+// ---------- 選取 ----------
+function setSel(list,silent,keepPop){
+  sel=new Set(list.map(e=>e.id));skillPage=0;
+  if(mode){mode=null;$('#toast').style.opacity=0;toastT=0;}
+  if(!keepPop)closePop();refreshAll();
+  if(!silent&&list.length){const m=countBy(list);toast('已選取 '+[...m].map(([t,n])=>keyName(t)+'×'+n).join('、'));}
+}
+function selKind(){
+  const es=selEnts();
+  if(!es.length)return{k:'none',es};
+  if(es.every(isB)){const m=countBy(es);let t=null,n=0;m.forEach((v,k)=>{if(v>n){n=v;t=k;}});return{k:'bld',type:t,es:es.filter(b=>b.type===t)};}
+  if(es.every(e=>e.cat==='pack'))return{k:'pack',es};
+  const us=es.filter(isMob);
+  if(us.every(e=>e.cat==='worker'))return{k:'worker',es:us};
+  return{k:'army',es:us};
+}
+let lastTap=null;
+function tapSelect(hit){
+  const t=now();
+  if(lastTap&&t-lastTap.t<330&&lastTap.type===hit.type){
+    const list=own(e=>e.type===hit.type&&inView(e));
+    setSel(list,true);gesture('<b>連點兩下</b> → 畫面內所有'+nm(hit)+'（'+list.length+'）');lastTap=null;
+  }else{setSel([hit],true);gesture('<b>點一下</b> → 選取 '+nm(hit));lastTap={t,type:hit.type};}
+}
+function inView(e){const p=w2s(e.x,e.y);return p.x>=0&&p.y>=0&&p.x<=VW&&p.y<=VH;}
+
+// ---------- 指令 ----------
+function formation(n,sp){const out=[[0,0]];let ring=1;while(out.length<n){const c=ring*6;for(let i=0;i<c&&out.length<n;i++){const a=i/c*Math.PI*2;out.push([Math.cos(a)*ring*sp,Math.sin(a)*ring*sp]);}ring++;}return out;}
+function moveCmd(es,w,amove,label){
+  const mv=es.filter(e=>!e.sieged&&e.type!=='drone');
+  if(es.some(e=>e.sieged))toast('架設中的坦克不會移動','bad');
+  if(!mv.length)return;
+  const f=formation(mv.length,30),cen=centroid(mv);
+  mv.sort((a,b)=>Math.atan2(a.y-cen.y,a.x-cen.x)-Math.atan2(b.y-cen.y,b.x-cen.x));
+  mv.forEach((e,i)=>{e.bq=[];e.order={k:'move',x:Math.max(10,Math.min(W-10,w.x+f[i][0])),y:Math.max(10,Math.min(H-10,w.y+f[i][1])),amove:!!amove};});
+  markers.push({x:w.x,y:w.y,t:0,c:amove?C.enemy:label==='retreat'?C.accent:C.ok});
+}
+function attackCmd(es,t){
+  const atk=es.filter(e=>TY[e.type].dmg);
+  atk.forEach(e=>{if(e.sieged&&hyp(e,t)>TY[e.type].range*1.8)return;e.bq=[];e.order={k:'attack',tid:t.id};});
+  markers.push({x:t.x,y:t.y,t:0,c:C.enemy,r:t.r});
+}
+function baseFor(r){let b=null,bd=1e9;for(const o of ents)if(o.team===0&&o.type==='base'&&o.built){const d=hyp(o,r);if(d<bd){bd=d;b=o;}}return b;}
+function minersOf(b){let n=0;for(const w of ents)if(w.type==='worker'&&w.order.k==='gather'&&w.order.base===b.id)n++;return n;}
+// 每個主堡最多 MINE_CAP 個工兵採廢料；已在這個主堡採的工兵只換目標，不重算名額
+function gather(ws,r){
+  if(!r)return;
+  const b=baseFor(r);let full=0;
+  ws.filter(w=>w.type==='worker').forEach(w=>{
+    if(b&&w.order.k==='gather'&&w.order.base===b.id){w.order.res=r.id;return;}
+    if(b&&minersOf(b)>=MINE_CAP){full++;return;}
+    w.bq=[];w.order={k:'gather',res:r.id,st:'to',base:b&&b.id};});
+  if(full)toast('這個'+FACS[FAC].base+'的採集工兵已滿（'+MINE_CAP+'），有 '+full+' 個工兵沒有加入','bad');
+}
+function stopCmd(es){es.forEach(e=>{if(e.type==='drone')return;e.bq=[];e.order={k:'idle'};});}
+function setMode(m,hint){
+  if(mode&&mode.k===m.k){clearMode();return;}
+  mode=m;toast(hint,'mode');refreshCmds(true);
+}
+function clearMode(){mode=null;const t=$('#toast');if(t.className==='mode'){t.style.opacity=0;toastT=0;}refreshCmds(true);}
+// 攻擊鈕是開關：開火（自動找附近敵人，可再點敵人集火）／停火；點地面一律是移動，用來甩打
+const isFiring=es=>(mode&&mode.k==='attack')||es.some(e=>isCombat(e)&&e.order.k==='attack');
+function armyAttack(es){
+  if(isFiring(es)){
+    es.forEach(e=>{if(isCombat(e)&&e.order.k==='attack')e.order={k:'hold'};});
+    if(mode)clearMode();
+    toast('停火');gesture('<b>再點攻擊</b> → 停火');refreshCmds(true);return;
+  }
+  let n=0;
+  es.forEach(e=>{if(!isCombat(e))return;const t=acquire(e,TY[e.type].range*(e.sieged?1.8:1)+150);if(t){e.order={k:'attack',tid:t.id,auto:true};n++;}});
+  mode={k:'attack'};
+  toast(n?'開火：'+n+' 個單位攻擊附近敵人。點敵人可集火，點地面就移動':'開火：附近沒有敵人。點敵人集火，點地面移動','mode');
+  gesture('<b>點攻擊</b> → 開火');refreshCmds(true);
+}
+
+// ---------- 放置模式 ----------
+function placeCheck(type,x,y,ignoreUid){
+  const T=TY[type];
+  if(x<T.r||y<T.r||x>W-T.r||y>H-T.r)return{ok:false,why:'超出地圖'};
+  for(const o of ents)if((isB(o)||o.cat==='res')&&hyp(o,{x,y})<o.r+T.r+6)return{ok:false,why:'這裡放不下，換個位置'};
+  for(const p of pend)if(p.uid!==ignoreUid&&Math.hypot(p.x-x,p.y-y)<p.r+T.r+6)return{ok:false,why:'已經有建築預定在這裡'};
+  if(FAC==='vine'&&!vineSource(x,y))return{ok:false,why:'超出臍帶範圍：要靠近已連線的建築'};
+  return{ok:true};
+}
+function vineSource(x,y){let b=null,bd=1e9;for(const o of ents)if(o.team===0&&isB(o)&&o.conn){const d=Math.hypot(o.x-x,o.y-y);if(d<=UMB&&d<bd){bd=d;b=o;}}return b;}
+function enterPlace(type,src){
+  const c=s2w(VW/2,VH*.45);
+  mode={k:'place',type,src,x:c.x,y:c.y};
+  if(FAC==='vine'&&!vineSource(c.x,c.y)){const b=own(e=>e.type==='base')[0];if(b){mode.x=b.x+b.r+TY[type].r+40;mode.y=b.y-20;}}
+  toast((FAC==='vine'?'生長 ':'放置 ')+tName(type)+'：單指移動建築，雙指移動鏡頭','mode');
+  closePop();refreshAll(true);
+}
+function confirmPlace(cont){
+  const m=mode;if(!m||m.k!=='place')return;
+  const T=TY[m.type];
+  const ck=placeCheck(m.type,m.x,m.y,FAC==='mech'?m.src:null);
+  if(!ck.ok){toast(ck.why,'bad');return;}
+  if(FAC==='scav'){
+    const ws=selEnts().filter(e=>e.type==='worker');
+    if(!ws.length){toast('沒有選取工兵','bad');clearMode();return;}
+    if(!pay(T.cost))return;
+    const load=w=>(w.order.k==='build'?1:0)+w.bq.length;
+    ws.sort((a,b)=>load(a)-load(b)||hyp(a,m)-hyp(b,m));
+    const w=ws[0],job={type:m.type,x:m.x,y:m.y};
+    if(w.order.k==='build')w.bq.push(job);else{w.bq=[];w.order=Object.assign({k:'build'},job);}
+    pend.push({x:m.x,y:m.y,r:T.r,uid:w.id});
+    gesture('<b>確認</b> → 工兵前往建造 '+T.name);
+  }else if(FAC==='vine'){
+    if(!pay(T.cost))return;
+    const src=vineSource(m.x,m.y);
+    const b=spawn(m.type,0,m.x,m.y,{built:false,prog:0,src:src&&src.id,age:0});b.hp=b.maxHp*.1;
+    updConn(false);
+    gesture('<b>確認</b> → '+tName(m.type)+' 開始生長');
+  }else{
+    const p=byId.get(m.src);
+    if(!p){clearMode();return;}
+    p.order={k:'deploy',x:m.x,y:m.y};
+    pend.push({x:m.x,y:m.y,r:T.r,uid:p.id});
+    gesture('<b>確認</b> → '+T.name+' 移動過去展開');
+  }
+  markers.push({x:m.x,y:m.y,t:0,c:C.accent,r:T.r});
+  if(!cont){clearMode();refreshAll();return;}
+  if(FAC==='mech'){
+    const next=selEnts().find(e=>e.type==='pack'&&e.ptype===m.type&&e.order.k!=='deploy'&&e.order.k!=='deploying');
+    if(!next){toast('沒有其他待部署的'+T.name);clearMode();return;}
+    m.src=next.id;
+  }
+  m.x=Math.min(W-T.r,m.x+T.r*2+24);
+  toast('連續建造：再放一座 '+T.name,'mode');refreshCmds(true);
+}
+
+function produce(es,type){
+  const bs=es.filter(b=>working(b)&&b.team===0);
+  if(!bs.length){toast(es.some(b=>b.built)?'建築斷線，無法生產':'建築尚未完成','bad');return false;}
+  bs.sort((a,b)=>a.q.length-b.q.length);const b=bs[0];
+  if(b.q.length>=5){toast('佇列已滿（5）','bad');return false;}
+  const T=TY[type];
+  if(popUsed()+T.pop>popCap()){toast('人口不足，請升級'+FACS[FAC].base,'bad');return false;}
+  if(!pay(T.cost))return false;
+  b.q.push({kind:'unit',type,t:0,total:T.pt});return true;
+}
+function queueBuilding(es,type){
+  const bs=es.filter(working);if(!bs.length){toast('主堡無法運作','bad');return;}
+  bs.sort((a,b)=>a.bq.length-b.bq.length);const b=bs[0];
+  if(b.bq.length>=3){toast('建築佇列已滿（3）','bad');return;}
+  const T=TY[type];if(!pay(T.cost))return;
+  b.bq.push({type,t:0,total:bt(type)});
+  toast('主堡開始生成 '+T.name+'（建築一次只能做一棟）');
+  gesture('<b>建造</b> → 主堡內生成 '+T.name);
+}
+const UPG={
+  base:{cost:[150,100],t:20,name:'主堡升級（人口 +20）',max:b=>b.lvl>=3,lv:b=>b.lvl},
+  barracks:{cost:[100,100],t:18,name:'地面部隊攻擊 +20%',max:()=>up.ground>=3,lv:()=>up.ground,team:'ground'},
+  airbase:{cost:[100,100],t:18,name:'空軍攻擊 +20%',max:()=>up.air>=3,lv:()=>up.air,team:'air'},
+  turret:{cost:[75,0],t:8,name:'砲塔攻擊 +30%',max:b=>b.lvl>=3,lv:b=>b.lvl},
+  depot:{cost:[100,50],t:15,name:'廢料採集量 +1',max:()=>up.gather>=2,lv:()=>up.gather,team:'gather'},
+};
+function upgrade(es){
+  const U=UPG[es[0].type];
+  const bs=es.filter(working);
+  const busy=b=>b.q.some(q=>q.kind==='upg');
+  let b;
+  if(U.team){
+    if(ents.some(x=>x.team===0&&x.type===es[0].type&&busy(x))){toast('升級進行中','bad');return;}
+    if(U.max()){toast('已達最高等級','bad');return;}
+    b=bs.sort((a,c)=>a.q.length-c.q.length)[0];
+  }else{
+    b=bs.find(x=>!busy(x)&&!U.max(x));
+    if(!b){toast(bs.some(busy)?'升級進行中':bs.length?'已達最高等級':'建築無法運作','bad');return;}
+  }
+  if(!b){toast('建築無法運作','bad');return;}
+  if(b.q.length>=5){toast('佇列已滿','bad');return;}
+  if(!pay(U.cost))return;
+  b.q.push({kind:'upg',t:0,total:U.t});toast('開始：'+U.name);
+}
+function repair(es){const b=es.find(x=>x.hp<x.maxHp);if(!b){toast('不需要維修');return;}if(!pay([25,0]))return;b.hp=Math.min(b.maxHp,b.hp+b.maxHp*.3);toast(nm(b)+' 已維修 30%');}
+function demolish(es){const b=es[0];const c=TY[b.type].cost||[0,0];res.s+=Math.floor(c[0]/2);res.g+=Math.floor(c[1]/2);b.hp=0;b.quiet=true;toast('已拆除 '+nm(b)+'，退回 50%');}
+function cancelBuild(es){es.forEach(b=>{const c=TY[b.type].cost;res.s+=Math.floor(c[0]*.75);res.g+=Math.floor(c[1]*.75);b.hp=0;b.quiet=true;});toast('已取消，退回 75%');}
+
+function castSkill(type){
+  const us=selEnts().filter(e=>e.type===type);
+  const S=TY[type].skill;
+  const ready=us.filter(e=>e.scd<=0);
+  if(!ready.length){toast(S.name+' 冷卻中','bad');return;}
+  if(S.id==='siege'){
+    const to=!ready.every(e=>e.sieged);
+    ready.forEach(e=>{e.sieged=to;e.order={k:'idle'};e.scd=S.cd;});
+    toast(to?'坦克架設：射程 +80%、不能移動':'坦克收起，可以移動');return;
+  }
+  ready.forEach(e=>{
+    e.scd=S.cd;
+    if(S.id==='stim')e.stim=5;
+    else if(S.id==='salvo')e.salvo=1;
+    else if(S.id==='shield'){e.shield=60;e.shieldT=6;}
+    else if(S.id==='boost')e.boost=4;
+    else if(S.id==='bomb'){booms.push({x:e.x,y:e.y,r:85,t:0,c:C.accent});for(const o of ents)if(o.team===1&&o.cat!=='air'&&hyp(o,e)<85+o.r)dmg(o,45,e);}
+  });
+  toast(TY[type].name+' 使用「'+S.name+'」×'+ready.length);
+}
+
+// ---------- 戰鬥 ----------
+function acquire(e,rad){let b=null,bd=1e9;for(const o of ents){if(o.team<0||o.team===e.team||o.hp<=0)continue;const d=hyp(e,o)-o.r;if(d<rad&&d<bd){bd=d;b=o;}}return b;}
+function dmgMult(e){if(e.team!==0)return 1;if(e.cat==='ground')return 1+.2*up.ground;if(e.cat==='air')return 1+.2*up.air;return 1;}
+function dmg(t,d,src){
+  if(t.shield>0){const a=Math.min(t.shield,d);t.shield-=a;d-=a;}
+  t.hp-=d;
+  if(t.team===0&&src&&src.team===1)pushEvent(t.x,t.y,nm(t)+' 遭受攻擊','atk');
+  if(src&&isCombat(t)&&(t.order.k==='idle'||t.order.k==='hold')&&!t.sieged&&src.hp>0)t.order={k:'attack',tid:src.id,auto:true,home:{x:t.x,y:t.y}};
+}
+function fire(e,t){
+  const T=TY[e.type];
+  const d=T.dmg*dmgMult(e)*(e.sieged?1.5:1)*(e.type==='turret'?1+.3*(e.lvl-1):1);
+  e.cd=T.cd*(e.stim>0?.6:1);
+  shots.push({x1:e.x,y1:e.y-(e.cat==='air'?6:0),x2:t.x,y2:t.y,t:0,c:e.team===0?C.ally:C.enemy,w:e.type==='tank'||e.type==='rocket'?3:1.5});
+  if(e.salvo>0){e.salvo=0;booms.push({x:t.x,y:t.y,r:70,t:0,c:C.accent});for(const o of ents)if(o.team===t.team&&hyp(o,t)<70+o.r)dmg(o,25,e);}
+  dmg(t,d,e);
+}
+function moveTo(e,x,y,spd,dt){
+  const dx=x-e.x,dy=y-e.y,d=Math.hypot(dx,dy);
+  if(d<3)return true;
+  const s=Math.min(d,spd*dt);e.x+=dx/d*s;e.y+=dy/d*s;e.ang=Math.atan2(dy,dx);return false;
+}
+
+// ---------- 尋路：建築與廢料堆在格子地圖上標成障礙，地面單位用 A* 繞路 ----------
+const CELL=40,GW=Math.ceil(W/CELL),GH=Math.ceil(H/CELL);
+let navGrid=new Uint8Array(GW*GH),navDirty=true,navVer=0;
+function buildNav(){
+  navGrid.fill(0);
+  for(const o of ents){if(!isB(o)&&o.cat!=='res')continue;
+    const R=o.r+14+CELL*.35,x0=Math.max(0,Math.floor((o.x-R)/CELL)),x1=Math.min(GW-1,Math.floor((o.x+R)/CELL)),y0=Math.max(0,Math.floor((o.y-R)/CELL)),y1=Math.min(GH-1,Math.floor((o.y+R)/CELL));
+    for(let gy=y0;gy<=y1;gy++)for(let gx=x0;gx<=x1;gx++)if(Math.hypot((gx+.5)*CELL-o.x,(gy+.5)*CELL-o.y)<R)navGrid[gy*GW+gx]=1;}
+  navDirty=false;navVer++;
+}
+const blockedAt=(x,y)=>{const gx=Math.floor(x/CELL),gy=Math.floor(y/CELL);return gx<0||gy<0||gx>=GW||gy>=GH||navGrid[gy*GW+gx]===1;};
+// 兩點之間直線是否暢通；ign 是目的地本身（例如要採的廢料堆），它周圍不算擋路
+function los(ax,ay,bx,by,ign){
+  const d=Math.hypot(bx-ax,by-ay),n=Math.ceil(d/12);
+  for(let i=1;i<n;i++){const x=ax+(bx-ax)*i/n,y=ay+(by-ay)*i/n;
+    if(ign&&Math.hypot(x-ign.x,y-ign.y)<ign.r+34)continue;
+    if(blockedAt(x,y))return false;}
+  return true;
+}
+function nearFree(gx,gy){
+  if(gx>=0&&gy>=0&&gx<GW&&gy<GH&&!navGrid[gy*GW+gx])return[gx,gy];
+  for(let r=1;r<10;r++){let best=null,bd=1e9;
+    for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+      const x=gx+dx,y=gy+dy;if(x<0||y<0||x>=GW||y>=GH||navGrid[y*GW+x])continue;const dd=dx*dx+dy*dy;if(dd<bd){bd=dd;best=[x,y];}}
+    if(best)return best;}
+  return null;
+}
+function findPath(sx,sy,tx,ty,ign){
+  const s=nearFree(Math.floor(sx/CELL),Math.floor(sy/CELL)),g=nearFree(Math.floor(tx/CELL),Math.floor(ty/CELL));
+  if(!s||!g)return[{x:tx,y:ty}];
+  const N=GW*GH,gs=new Float32Array(N).fill(Infinity),from=new Int32Array(N).fill(-1),closed=new Uint8Array(N);
+  const si=s[1]*GW+s[0],gi=g[1]*GW+g[0];
+  const heap=[];const push=(i,f)=>{heap.push([f,i]);let k=heap.length-1;while(k>0){const p=(k-1)>>1;if(heap[p][0]<=heap[k][0])break;[heap[p],heap[k]]=[heap[k],heap[p]];k=p;}};
+  const pop=()=>{const top=heap[0],last=heap.pop();if(heap.length){heap[0]=last;let k=0;for(;;){const l=2*k+1,r=l+1;let m=k;if(l<heap.length&&heap[l][0]<heap[m][0])m=l;if(r<heap.length&&heap[r][0]<heap[m][0])m=r;if(m===k)break;[heap[m],heap[k]]=[heap[k],heap[m]];k=m;}}return top;};
+  const hfn=i=>{const x=i%GW,y=(i/GW)|0,dx=Math.abs(x-g[0]),dy=Math.abs(y-g[1]);return Math.max(dx,dy)+.414*Math.min(dx,dy);};
+  gs[si]=0;push(si,hfn(si));
+  const D=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.414],[1,-1,1.414],[-1,1,1.414],[-1,-1,1.414]];
+  let found=false;
+  while(heap.length){const [,i]=pop();if(closed[i])continue;closed[i]=1;if(i===gi){found=true;break;}
+    const x=i%GW,y=(i/GW)|0;
+    for(const [dx,dy,c] of D){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=GW||ny>=GH)continue;const ni=ny*GW+nx;if(navGrid[ni]||closed[ni])continue;
+      if(dx&&dy&&(navGrid[y*GW+nx]||navGrid[ny*GW+x]))continue;
+      const ng=gs[i]+c;if(ng<gs[ni]){gs[ni]=ng;from[ni]=i;push(ni,ng+hfn(ni));}}}
+  if(!found)return[{x:tx,y:ty}];
+  const cells=[];for(let i=gi;i!==-1;i=from[i])cells.push({x:(i%GW+.5)*CELL,y:(((i/GW)|0)+.5)*CELL});
+  cells.reverse();cells.push({x:tx,y:ty});
+  // 拉直路徑：能直線走到的點就略過中間的格子
+  const out=[];let cur={x:sx,y:sy},k=0;
+  while(k<cells.length){let j=cells.length-1;while(j>k&&!los(cur.x,cur.y,cells[j].x,cells[j].y,j===cells.length-1?ign:null))j--;out.push(cells[j]);cur=cells[j];k=j+1;}
+  return out;
+}
+// 地面單位前往目標：需要時重新尋路；前方有停住的己方單位時往側邊繞
+function goTo(e,x,y,spd,dt,ign){
+  if(isAirLike(e))return moveTo(e,x,y,spd,dt);
+  let nav=e.nav;
+  if(!nav||nav.ver!==navVer||Math.hypot(nav.tx-x,nav.ty-y)>40){
+    const pts=los(e.x,e.y,x,y,ign)?[{x,y}]:findPath(e.x,e.y,x,y,ign);
+    nav=e.nav={tx:x,ty:y,pts,i:0,ver:navVer};
+  }
+  const last=nav.i>=nav.pts.length-1,p=last?{x,y}:nav.pts[nav.i];
+  if(!last&&Math.hypot(p.x-e.x,p.y-e.y)<14){nav.i++;return false;}
+  if(last&&!ign&&blockedAt(x,y)&&Math.hypot(x-e.x,y-e.y)<CELL*1.3){e.nav=null;return true;}
+  const done=steerMove(e,p.x,p.y,spd,dt);
+  if(done&&last){e.nav=null;return true;}
+  return false;
+}
+function steerMove(e,x,y,spd,dt){
+  const dx=x-e.x,dy=y-e.y,d=Math.hypot(dx,dy);
+  if(d<3)return true;
+  let ux=dx/d,uy=dy/d;
+  if(e.cat!=='worker'){
+    const nx=-uy,ny=ux;let ax=0,ay=0;
+    for(const o of ents){if(o===e||!isMob(o)||isAirLike(o)||o.cat==='worker')continue;
+      if(o.order.k==='move'&&e.order.k==='move')continue;
+      const rx=o.x-e.x,ry=o.y-e.y,along=rx*ux+ry*uy,look=e.r+o.r+30;
+      if(along<=0||along>look||along>d)continue;
+      const perp=rx*nx+ry*ny,clr=e.r+o.r+4;
+      if(Math.abs(perp)>=clr)continue;
+      const side=perp>0?-1:1,w=1-along/look;ax+=nx*side*w;ay+=ny*side*w;}
+    if(ax||ay){ux+=ax*1.4;uy+=ay*1.4;const m=Math.hypot(ux,uy);ux/=m;uy/=m;}
+  }
+  const s=Math.min(d,spd*dt);e.x+=ux*s;e.y+=uy*s;e.ang=Math.atan2(uy,ux);return false;
+}
+
+function finishBuild(b){
+  b.built=true;b.prog=1;b.age=b.age||0;
+  pushEvent(b.x,b.y,tName(b.type)+' 完成','done');
+  toast(tName(b.type)+(FAC==='vine'?' 生長完成':' 建造完成'));refreshAll(true);
+}
+function updUnit(e,dt){
+  const T=TY[e.type];
+  e.cd=Math.max(0,e.cd-dt);e.scd=Math.max(0,e.scd-dt);
+  if(e.stim>0)e.stim-=dt;if(e.boost>0)e.boost-=dt;
+  if(e.shieldT>0){e.shieldT-=dt;if(e.shieldT<=0)e.shield=0;}
+  const spd=(T.speed||0)*(e.stim>0?1.5:1)*(e.boost>0?2:1);
+  const rng=(T.range||0)*(e.sieged?1.8:1);
+  const o=e.order;
+  if(isB(e)){
+    if(!e.built&&FAC==='vine'&&e.team===0&&e.conn){e.prog+=dt/bt(e.type);e.hp=Math.min(e.maxHp,e.hp+e.maxHp*.9*dt/bt(e.type));if(e.prog>=1)finishBuild(e);}
+    if(e.type==='turret'&&working(e)){const t=acquire(e,rng);if(t&&e.cd<=0)fire(e,t);}
+    return;
+  }
+  switch(o.k){
+    case 'hold':break;
+    case 'idle':{
+      if(isCombat(e)){const t=acquire(e,rng+(e.team?120:40));if(t){if(e.sieged){if(hyp(e,t)-t.r<=rng)e.order={k:'attack',tid:t.id,auto:true};}else e.order={k:'attack',tid:t.id,auto:true,home:{x:e.x,y:e.y}};}}
+      break;}
+    case 'move':{
+      if(o.amove&&isCombat(e)){const t=acquire(e,rng+60);if(t){e.order={k:'attack',tid:t.id,auto:true,resume:o};break;}}
+      if(goTo(e,o.x,o.y,spd,dt))e.order={k:'idle'};
+      break;}
+    case 'attack':{
+      const t=byId.get(o.tid);
+      if(!t||t.hp<=0){e.order=o.resume||{k:'idle'};break;}
+      const d=hyp(e,t)-t.r;
+      if(d>rng){
+        if(e.sieged){e.order={k:'idle'};break;}
+        if(o.auto&&o.home&&hyp(e,o.home)>280){e.order={k:'move',x:o.home.x,y:o.home.y};break;}
+        goTo(e,t.x,t.y,spd,dt,t);
+      }else{e.ang=Math.atan2(t.y-e.y,t.x-e.x);if(e.cd<=0)fire(e,t);}
+      break;}
+    case 'gather':{
+      let r=byId.get(o.res);
+      if(o.st==='to'){
+        if(!r||r.amt<=0){r=nearestRes(e);if(!r){e.order={k:'idle'};break;}o.res=r.id;}
+        // 採集往返直線走（工兵不跟廢料堆、主堡互相卡住），其他移動才用尋路
+        if(hyp(e,r)>r.r+e.r+2){if(hyp(e,r)>260)goTo(e,r.x,r.y,spd,dt,r);else moveTo(e,r.x,r.y,spd,dt);}else{o.st='mine';o.t=1.6;e.nav=null;}
+      }else if(o.st==='mine'){
+        o.t-=dt;
+        if(o.t<=0){if(r&&r.amt>0){const n=Math.min(r.amt,5+up.gather);r.amt-=n;e.carry=n;}o.st='back';}
+      }else{
+        const dp=nearestDrop(e);if(!dp){e.order={k:'idle'};break;}
+        if(hyp(e,dp)>dp.r+e.r+2){if(hyp(e,dp)>260)goTo(e,dp.x,dp.y,spd,dt,dp);else moveTo(e,dp.x,dp.y,spd,dt);}
+        else{if(e.carry){res.s+=e.carry;e.carry=0;}o.st='to';}
+      }
+      break;}
+    case 'build':{
+      const BT=TY[o.type];
+      if(!o.bid){
+        if(hyp(e,o)>BT.r+e.r+4)goTo(e,o.x,o.y,spd,dt);
+        else{const b=spawn(o.type,0,o.x,o.y,{built:false,prog:0});b.hp=b.maxHp*.1;o.bid=b.id;}
+      }else{
+        const b=byId.get(o.bid);
+        if(!b||b.hp<=0||b.built){e.order={k:'idle'};}
+        else if(hyp(e,b)>b.r+e.r+10)goTo(e,b.x,b.y,spd,dt,b);
+        else{b.prog+=dt/bt(b.type);b.hp=Math.min(b.maxHp,b.hp+b.maxHp*.9*dt/bt(b.type));if(b.prog>=1){finishBuild(b);e.order={k:'idle'};}}
+      }
+      if(e.order.k==='idle'&&e.bq.length)e.order=Object.assign({k:'build'},e.bq.shift());
+      break;}
+    case 'drone':{
+      const b=own(x=>x.type==='base'&&x.built).sort((a,c)=>hyp(a,e)-hyp(c,e))[0];
+      if(!b)break;
+      if(o.wait>0){o.wait-=dt;break;}
+      if(!o.tx||moveTo(e,o.tx,o.ty,spd,dt)){
+        if(o.tx&&!o.waited){o.wait=1.5;o.waited=true;break;}
+        const a=Math.random()*Math.PI*2,rr=b.r+60+Math.random()*160;
+        o.tx=b.x+Math.cos(a)*rr;o.ty=b.y+Math.sin(a)*rr;o.waited=false;
+      }
+      break;}
+    case 'deploy':{
+      if(goTo(e,o.x,o.y,spd,dt)){
+        const ck=placeCheck(e.ptype,o.x,o.y,e.id);
+        if(!ck.ok){toast('無法展開：'+ck.why,'bad');e.order={k:'idle'};pushEvent(e.x,e.y,'待部署建築無法展開','fail');break;}
+        e.order={k:'deploying',x:o.x,y:o.y,t:1.5};
+      }
+      break;}
+    case 'deploying':{
+      o.t-=dt;
+      if(o.t<=0){const b=spawn(e.ptype,0,o.x,o.y);e.hp=0;e.quiet=true;pushEvent(b.x,b.y,TY[b.type].name+' 展開完成','done');toast(TY[b.type].name+' 展開完成');}
+      break;}
+  }
+}
+
+function updBuilding(b,dt){
+  if(b.team!==0||!working(b))return;
+  if(b.type==='base'&&b.bq.length){
+    const q=b.bq[0];q.t+=dt;
+    if(q.t>=q.total){b.bq.shift();const a=Math.random()*Math.PI*2;const p=spawn('pack',0,b.x+Math.cos(a)*(b.r+28),b.y+Math.sin(a)*(b.r+28),{ptype:q.type});
+      pushEvent(p.x,p.y,TY[q.type].name+' 生成完成，待部署','pack');toast(TY[q.type].name+' 生成完成：選取它 → 部署');}
+  }
+  if(!b.q.length&&b.loop){const T=TY[b.loop];if(afford(T.cost)&&popUsed()+T.pop<=popCap()){res.s-=T.cost[0];res.g-=T.cost[1];b.q.push({kind:'unit',type:b.loop,t:0,total:T.pt});}}
+  const q=b.q[0];if(!q)return;
+  q.t+=dt;
+  if(q.t<q.total)return;
+  b.q.shift();
+  if(q.kind==='upg'){const U=UPG[b.type];if(U.team)up[U.team]++;else b.lvl++;toast('完成：'+U.name);pushEvent(b.x,b.y,'升級完成','done');return;}
+  const tx=b.rally?b.rally.x:b.x+80,ty=b.rally?b.rally.y:b.y+60;
+  const a=Math.atan2(ty-b.y,tx-b.x);
+  const u=spawn(q.type,0,b.x+Math.cos(a)*(b.r+16),b.y+Math.sin(a)*(b.r+16));
+  if(u.type==='drone'){u.order={k:'drone'};return;}
+  if(b.rally&&b.rally.res&&u.cat==='worker'){const r=byId.get(b.rally.res);if(r)gather([u],r);}
+  else if(b.rally)u.order={k:'move',x:tx+(Math.random()-.5)*40,y:ty+(Math.random()-.5)*40,amove:isCombat(u)};
+  else if(u.cat==='worker'&&SET.autoGather==='on')gather([u],nearestRes(u));
+}
+
+// 蔓生族臍帶網路：從母體出發，範圍內相鄰建築都連線
+function updConn(notify){
+  if(FAC!=='vine'){for(const e of ents)e.conn=true;return;}
+  const bs=ents.filter(e=>e.team===0&&isB(e));
+  const prev=new Map(bs.map(b=>[b.id,b.conn]));
+  bs.forEach(b=>b.conn=false);
+  const q=bs.filter(b=>b.type==='base'&&b.built);q.forEach(b=>b.conn=true);
+  while(q.length){const a=q.shift();for(const b of bs)if(!b.conn&&hyp(a,b)<=UMB){b.conn=true;q.push(b);}}
+  if(notify)bs.forEach(b=>{
+    if(prev.get(b.id)&&!b.conn&&b.built){pushEvent(b.x,b.y,'臍帶斷線：'+tName(b.type)+' 失去功能','cut');toast('臍帶斷線：'+tName(b.type)+' 失去功能','bad');}
+    if(prev.get(b.id)===false&&b.conn&&b.built)toast(tName(b.type)+' 重新連線');});
+}
+
+function gasTick(dt){
+  let rate=0;
+  for(const b of ents){
+    if(b.team!==0)continue;
+    if(b.type==='pump'&&working(b)){let n=0;for(const o of ents)if(o!==b&&o.team===0&&o.type==='pump'&&o.built&&hyp(o,b)<PUMP_R*2)n++;b.rate=1.2*Math.max(.2,1-.4*n);rate+=b.rate;}
+    if(b.type==='lung'){if(b.conn!==false)b.age=(b.age||0)+dt;if(working(b)){b.rate=1.8*Math.min(1,.1+b.age/110);rate+=b.rate;}else b.rate=0;}
+    if(b.type==='drone'){const nb=ents.some(o=>o.team===0&&o.type==='base'&&o.built&&hyp(o,b)<340);if(nb)rate+=.5;}
+  }
+  res.g+=rate*dt;gasRate=rate;
+}
+
+function separate(){
+  const us=ents.filter(e=>isMob(e)&&e.cat!=='worker');
+  for(let i=0;i<us.length;i++){const a=us[i];
+    for(let j=i+1;j<us.length;j++){const b=us[j];
+      if(isAirLike(a)!==isAirLike(b))continue;
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||.01,m=a.r+b.r;
+      if(d<m){const p=(m-d)/2,nx=dx/d,ny=dy/d;
+        if(!a.sieged){a.x-=nx*p;a.y-=ny*p;}if(!b.sieged){b.x+=nx*p;b.y+=ny*p;}}
+    }}
+  for(const u of ents){if(!isMob(u)||isAirLike(u))continue;
+    for(const b of ents){if(!isB(b)&&b.cat!=='res')continue;if(u.order.k==='build'&&u.order.bid===b.id)continue;
+      const dx=u.x-b.x,dy=u.y-b.y,d=Math.hypot(dx,dy)||.01,m=b.r+u.r-(u.cat==='worker'?6:0);
+      if(d<m){u.x=b.x+dx/d*m;u.y=b.y+dy/d*m;}}}
+}
+
+function step(dt){
+  time+=dt;
+  if(navDirty)buildNav();
+  for(const e of ents){if(isB(e))updBuilding(e,dt);if(e.cat!=='res')updUnit(e,dt);}
+  separate();gasTick(dt);
+  let dead=false;
+  ents=ents.filter(e=>{const gone=e.cat==='res'?e.amt<=0:e.hp<=0;if(gone){byId.delete(e.id);if(isB(e)||e.cat==='res')navDirty=true;if(sel.delete(e.id))dead=true;if(e.hp<=0&&e.cat!=='res'&&!e.quiet)booms.push({x:e.x,y:e.y,r:e.r*1.6,t:0,c:e.team===0?C.ally:C.enemy});}return!gone;});
+  slots=slots.map(s=>s.filter(id=>byId.has(id)));
+  pend=pend.filter(p=>{const u=byId.get(p.uid);if(!u)return false;
+    if(u.type==='pack')return u.order.k==='deploy'||u.order.k==='deploying';
+    return(u.order.k==='build'&&!u.order.bid&&u.order.x===p.x&&u.order.y===p.y)||u.bq.some(j=>j.x===p.x&&j.y===p.y);});
+  connT-=dt;if(connT<=0||dead){connT=.4;updConn(true);}
+  if(dead)refreshAll();
+  if(mode&&mode.k==='place'&&FAC==='mech'&&!byId.has(mode.src))clearMode();
+  events=events.filter(e=>time-e.t<EV_LIFE);
+  markers.forEach(m=>m.t+=dt);markers=markers.filter(m=>m.t<.6);
+  shots.forEach(s=>s.t+=dt);shots=shots.filter(s=>s.t<.12);
+  booms.forEach(b=>b.t+=dt);booms=booms.filter(b=>b.t<.45);
+  if(SET.waves==='on'){waveT-=dt;if(waveT<=0){waveT=110;
+    for(let i=0;i<4;i++){const u=spawn(i<3?'inf':'rocket',1,2800+i*24,640);u.order={k:'move',x:470,y:1800,amove:true};}
+    pushEvent(2820,640,'敵軍來襲','wave');toast('敵軍來襲：從右上方往你的'+FACS[FAC].base+'前進','bad');}}
+}
+
+// ---------- 繪圖 ----------
+function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+function bPath(shape,x,y,r){
+  if(shape==='hex'){ctx.beginPath();for(let i=0;i<6;i++){const a=Math.PI/6+i*Math.PI/3;ctx.lineTo(x+Math.cos(a)*r*1.1,y+Math.sin(a)*r*1.1);}ctx.closePath();}
+  else if(shape==='blob'){ctx.beginPath();for(let i=0;i<=24;i++){const a=i/24*Math.PI*2,rr=r*(1+.07*Math.sin(a*5+time*1.5));ctx.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);}ctx.closePath();}
+  else rrect(ctx,x-r,y-r,r*2,r*2,r*.28);
+}
+function hpBar(e){
+  const w=e.r*2,f=Math.max(0,e.hp/e.maxHp),oy=isAirLike(e)?6:0;
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(e.x-w/2,e.y-e.r-12-oy,w,5);
+  ctx.fillStyle=f>.5?C.ok:f>.25?C.accent:C.bad;ctx.fillRect(e.x-w/2,e.y-e.r-12-oy,w*f,5);
+}
+function label(ch,x,y,size,col){ctx.fillStyle=col;ctx.font='700 '+size+'px "Noto Sans TC","PingFang TC",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(ch,x,y+size*.05);}
+// 建築下方的生產佇列：一排小圓圖示，第一個用外圈弧線表示進度
+function drawQueue(b,list,by,col,loop){
+  const n=Math.min(list.length,6),sp=19,x0=b.x-(n-1)*sp/2,y=by+9;
+  for(let i=0;i<n;i++){const q=list[i],x=x0+i*sp;
+    ctx.fillStyle='rgba(0,0,0,.65)';ctx.beginPath();ctx.arc(x,y,8.5,0,7);ctx.fill();
+    if(i===0){ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(x,y,8.5,-Math.PI/2,-Math.PI/2+Math.PI*2*q.t/q.total);ctx.stroke();}
+    label(q.kind==='upg'?'升':TY[q.type].ch,x,y,10,i===0?C.fg:C.dim);}
+  let tx=x0+n*sp;
+  if(list.length>n){label('+'+(list.length-n),tx,y,10,C.dim);tx+=16;}
+  if(loop)label('∞',tx,y,11,C.accent);
+}
+function umbilical(a,b,col,w){const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,nx=-(b.y-a.y)*.12,ny=(b.x-a.x)*.12;ctx.strokeStyle=col;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.quadraticCurveTo(mx+nx,my+ny,b.x,b.y);ctx.stroke();}
+
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#0c0e0b';ctx.fillRect(0,0,VW,VH);
+  ctx.save();ctx.translate(VW/2,VH/2);ctx.scale(cam.z,cam.z);ctx.translate(-cam.x,-cam.y);
+  ctx.fillStyle='#343f2f';ctx.fillRect(0,0,W,H);
+  for(const p of patches){ctx.fillStyle=p.d?'rgba(20,28,18,.28)':'rgba(120,130,90,.07)';ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);ctx.fill();}
+  ctx.strokeStyle='rgba(255,255,255,.035)';ctx.lineWidth=1/cam.z;ctx.beginPath();
+  for(let x=0;x<=W;x+=200){ctx.moveTo(x,0);ctx.lineTo(x,H);}for(let y=0;y<=H;y+=200){ctx.moveTo(0,y);ctx.lineTo(W,y);}ctx.stroke();
+  ctx.strokeStyle='rgba(236,226,196,.25)';ctx.lineWidth=3;ctx.strokeRect(0,0,W,H);
+  const placing=mode&&mode.k==='place';
+
+  // 輻能氣（平均分布，畫成淡淡的霧）
+  ctx.fillStyle='rgba(207,224,106,.045)';for(let i=0;i<80;i++){const x=(i*397)%W,y=((i*251+Math.sin(time*.3+i)*30)%H+H)%H;ctx.beginPath();ctx.arc(x,y,70,0,7);ctx.fill();}
+  // 蔓生族：臍帶範圍（放置時）與臍帶連線
+  if(FAC==='vine'){
+    const bs=ents.filter(e=>e.team===0&&isB(e));
+    if(placing){ctx.fillStyle='rgba(217,143,134,.07)';ctx.strokeStyle='rgba(217,143,134,.35)';ctx.lineWidth=1.5;ctx.setLineDash([10,8]);
+      for(const b of bs)if(b.conn){ctx.beginPath();ctx.arc(b.x,b.y,UMB,0,7);ctx.fill();ctx.stroke();}ctx.setLineDash([]);}
+    for(let i=0;i<bs.length;i++)for(let j=i+1;j<bs.length;j++){const a=bs[i],b=bs[j];if(hyp(a,b)>UMB)continue;
+      const ok=a.conn&&b.conn;umbilical(a,b,ok?'rgba(217,143,134,.75)':'rgba(140,140,140,.45)',ok?5:3);}
+  }
+  // 廢料堆
+  for(const r of ents){if(r.cat!=='res')continue;
+    ctx.globalAlpha=.5+.5*r.amt/1500;
+    for(const [ox,oy,s,c] of [[-9,4,12,'#8f7556'],[6,-5,13,C.scrap],[4,8,9,'#a88a63'],[-3,-9,8,'#7a6550']]){ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(r.x+ox-s,r.y+oy);ctx.lineTo(r.x+ox-s*.3,r.y+oy-s*.8);ctx.lineTo(r.x+ox+s,r.y+oy-s*.3);ctx.lineTo(r.x+ox+s*.6,r.y+oy+s*.6);ctx.closePath();ctx.fill();}
+    ctx.globalAlpha=1;}
+  // 選取圈
+  for(const e of ents){if(!sel.has(e.id))continue;ctx.strokeStyle=C.ok;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(e.x,e.y+(isB(e)?0:e.r*.5)+(isAirLike(e)?10:0),e.r+5,(e.r+5)*(isB(e)?1:.55),0,0,7);ctx.stroke();}
+  // 抽氣塔範圍
+  if(FAC==='scav'&&((placing&&mode.type==='pump')||selEnts().some(e=>e.type==='pump'))){
+    for(const b of ents)if(b.team===0&&b.type==='pump'){ctx.strokeStyle='rgba(207,224,106,.35)';ctx.lineWidth=1.5;ctx.setLineDash([6,6]);ctx.beginPath();ctx.arc(b.x,b.y,PUMP_R,0,7);ctx.stroke();ctx.setLineDash([]);}
+  }
+  // 建築
+  for(const b of ents){if(!isB(b))continue;const ownB=b.team===0,off=ownB&&FAC==='vine'&&!b.conn;
+    const col=off?'#7d7d7d':ownB?C.ally:C.enemy,shape=ownB?FACS[FAC].shape:'sq';
+    ctx.globalAlpha=b.built?1:.55;
+    bPath(shape,b.x,b.y,b.r);ctx.fillStyle=off?'#2a2a2a':shape==='blob'?'#2e211f':'#22261e';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=3;ctx.stroke();
+    label(chOf(b),b.x,b.y,b.r*.85,col);ctx.globalAlpha=1;
+    if(off)label('斷線',b.x,b.y-b.r-14,12,C.bad);
+    if(b.type==='base'&&ownB){label('Lv'+b.lvl,b.x,b.y+b.r*.62,12,C.dim);if(b.built){const n=minersOf(b);label('工 '+n+'/'+MINE_CAP,b.x,b.y-b.r*.6,12,n>=MINE_CAP?C.accent:C.dim);}}
+    const paused=!b.built&&ownB&&FAC==='scav'&&!builderOf(b);
+    if(paused)label('暫停',b.x,b.y-b.r-14,12,C.dim);
+    if(!b.built){ctx.strokeStyle=paused?C.dim:FAC==='vine'&&ownB?C.flesh:C.accent;ctx.lineWidth=4;ctx.beginPath();ctx.arc(b.x,b.y,b.r+8,-Math.PI/2,-Math.PI/2+Math.PI*2*b.prog);ctx.stroke();}
+    let by=b.y+b.r+5;
+    if(b.q.length){drawQueue(b,b.q,by,C.accent,b.loop);by+=22;}
+    else if(b.loop){label('∞ '+TY[b.loop].name,b.x,by+9,11,C.dim);by+=18;}
+    if(b.bq.length)drawQueue(b,b.bq,by,C.ally,null);
+    if((b.type==='pump'||b.type==='lung')&&b.built&&ownB)label('+'+(b.rate||0).toFixed(1)+'/s',b.x,b.y+b.r+12,11,b.rate>0?C.gas:C.dim);
+    if(b.type==='turret'&&sel.has(b.id)){ctx.strokeStyle='rgba(98,180,255,.25)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(b.x,b.y,TY.turret.range,0,7);ctx.stroke();}
+    if(sel.has(b.id)&&b.rally){ctx.setLineDash([8,6]);ctx.strokeStyle=C.accent;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.rally.x,b.rally.y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=C.accent;ctx.beginPath();ctx.arc(b.rally.x,b.rally.y,5,0,7);ctx.fill();}
+  }
+  // 遺械：待部署建築與預定地點
+  for(const p of ents){if(p.type!=='pack')continue;
+    if(p.order.k==='deploy'||p.order.k==='deploying'){const o=p.order;ctx.setLineDash([6,6]);ctx.strokeStyle='rgba(98,180,255,.6)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(o.x,o.y);ctx.stroke();
+      bPath('hex',o.x,o.y,TY[p.ptype].r);ctx.stroke();ctx.setLineDash([]);}
+    const k=p.order.k==='deploying'?1-p.order.t/1.5:0,r=p.r+(TY[p.ptype].r-p.r)*k;
+    bPath('hex',p.x,p.y,r);ctx.fillStyle='#1d2430';ctx.fill();ctx.strokeStyle=C.ally;ctx.lineWidth=2.5;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);
+    label(TY[p.ptype].ch,p.x,p.y,r*.9,C.ally);
+  }
+  // 地面單位
+  for(const e of ents){if(e.cat!=='worker'&&e.cat!=='ground')continue;if(e.type==='drone')continue;const col=e.team===0?C.ally:C.enemy;
+    if(e.sieged){ctx.strokeStyle='rgba(227,169,72,.22)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(e.x,e.y,TY.tank.range*1.8,0,7);ctx.stroke();
+      ctx.strokeStyle=C.accent;ctx.lineWidth=3;for(let i=0;i<4;i++){const a=Math.PI/4+i*Math.PI/2;ctx.beginPath();ctx.moveTo(e.x+Math.cos(a)*e.r,e.y+Math.sin(a)*e.r);ctx.lineTo(e.x+Math.cos(a)*(e.r+8),e.y+Math.sin(a)*(e.r+8));ctx.stroke();}}
+    ctx.fillStyle='#1d221b';ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.stim>0?4:2.5;ctx.stroke();
+    label(TY[e.type].ch,e.x,e.y,e.r*1.05,col);
+    if(e.carry){ctx.fillStyle=C.scrap;ctx.beginPath();ctx.arc(e.x+e.r*.7,e.y-e.r*.7,4,0,7);ctx.fill();}
+    if(e.shield>0){ctx.strokeStyle='rgba(111,227,210,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(e.x,e.y,e.r+5,0,7);ctx.stroke();}
+  }
+  for(const s of shots){ctx.strokeStyle=s.c;ctx.globalAlpha=1-s.t/.12;ctx.lineWidth=s.w;ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();}ctx.globalAlpha=1;
+  // 空中（含無人機）
+  for(const e of ents){if(!isAirLike(e))continue;ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(e.x+6,e.y+14,e.r*.9,e.r*.45,0,0,7);ctx.fill();}
+  for(const e of ents){if(!isAirLike(e))continue;const col=e.team===0?C.ally:C.enemy;
+    if(e.type==='drone'){ctx.save();ctx.translate(e.x,e.y-6);ctx.rotate(time*2);ctx.fillStyle='#1d2430';ctx.strokeStyle=C.gas;ctx.lineWidth=2;ctx.beginPath();ctx.rect(-e.r*.7,-e.r*.7,e.r*1.4,e.r*1.4);ctx.fill();ctx.stroke();ctx.restore();continue;}
+    ctx.save();ctx.translate(e.x,e.y-6);ctx.rotate(e.ang||0);ctx.beginPath();ctx.moveTo(e.r*1.25,0);ctx.lineTo(-e.r*.85,e.r*.95);ctx.lineTo(-e.r*.35,0);ctx.lineTo(-e.r*.85,-e.r*.95);ctx.closePath();
+    ctx.fillStyle='#1d221b';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.boost>0?4:2.5;ctx.stroke();ctx.restore();
+    label(TY[e.type].ch,e.x-2,e.y-6,e.r*.8,col);}
+  for(const e of ents){if(e.cat==='res')continue;if(sel.has(e.id)||e.hp<e.maxHp)hpBar(e);}
+  // 放置中的半透明建築
+  if(placing){
+    const T=TY[mode.type],ck=placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null),col=ck.ok?C.ok:C.bad;
+    if(FAC==='vine'&&ck.ok){const s=vineSource(mode.x,mode.y);if(s){ctx.setLineDash([8,6]);umbilical(s,mode,'rgba(217,143,134,.8)',4);ctx.setLineDash([]);}}
+    if(mode.type==='pump'){ctx.strokeStyle='rgba(207,224,106,.55)';ctx.lineWidth=1.5;ctx.setLineDash([6,6]);ctx.beginPath();ctx.arc(mode.x,mode.y,PUMP_R,0,7);ctx.stroke();ctx.setLineDash([]);
+      let n=0;for(const o of ents)if(o.team===0&&o.type==='pump'&&hyp(o,mode)<PUMP_R*2)n++;
+      if(n)label('與 '+n+' 座重疊：產量 -'+Math.round(Math.min(.8,.4*n)*100)+'%',mode.x,mode.y-T.r-26,12,C.bad);}
+    ctx.globalAlpha=.5;bPath(FACS[FAC].shape,mode.x,mode.y,T.r);ctx.fillStyle='#22261e';ctx.fill();ctx.globalAlpha=1;
+    ctx.strokeStyle=col;ctx.lineWidth=3;ctx.setLineDash([8,5]);bPath(FACS[FAC].shape,mode.x,mode.y,T.r);ctx.stroke();ctx.setLineDash([]);
+    label(tCh(mode.type),mode.x,mode.y,T.r*.85,col);
+    if(!ck.ok)label(ck.why,mode.x,mode.y+T.r+16,12,C.bad);
+  }
+  for(const b of booms){ctx.strokeStyle=b.c;ctx.globalAlpha=1-b.t/.45;ctx.lineWidth=3;ctx.beginPath();ctx.arc(b.x,b.y,b.r*(.4+b.t/.45*.6),0,7);ctx.stroke();}ctx.globalAlpha=1;
+  for(const m of markers){const k=m.t/.6;ctx.strokeStyle=m.c;ctx.globalAlpha=1-k;ctx.lineWidth=3;ctx.beginPath();ctx.arc(m.x,m.y,(m.r||0)+18*(1-k)+6,0,7);ctx.stroke();}ctx.globalAlpha=1;
+  ctx.restore();
+  if(G&&G.k==='circle'){ctx.fillStyle='rgba(134,214,127,.12)';ctx.strokeStyle=C.ok;ctx.lineWidth=2;ctx.beginPath();ctx.arc(G.sx,G.sy,G.r,0,7);ctx.fill();ctx.stroke();}
+  drawMini();
+}
+function drawMini(){
+  const w=mm.width,h=mm.height,sx=w/W,sy=h/H;
+  mctx.setTransform(1,0,0,1,0,0);mctx.fillStyle='#2b3427';mctx.fillRect(0,0,w,h);
+  for(const e of ents){
+    mctx.fillStyle=e.cat==='res'?C.scrap:e.team===0?(isB(e)&&FAC==='vine'&&!e.conn?'#7d7d7d':C.ally):C.enemy;
+    const s=isB(e)?5*DPR:e.cat==='res'?3*DPR:2.2*DPR;mctx.fillRect(e.x*sx-s/2,e.y*sy-s/2,s,s);
+  }
+  if(Math.floor(time*3)%2)for(const ev of events){mctx.strokeStyle=C.accent;mctx.lineWidth=1.5*DPR;mctx.beginPath();mctx.arc(ev.x*sx,ev.y*sy,6*DPR,0,7);mctx.stroke();}
+  const hw=VW/2/cam.z,hh=VH/2/cam.z;
+  mctx.strokeStyle='#ece6d6';mctx.lineWidth=1.2*DPR;mctx.strokeRect((cam.x-hw)*sx,(cam.y-hh)*sy,hw*2*sx,hh*2*sy);
+}
+
+// ---------- 地圖手勢 ----------
+const ptrs=new Map();let G=null;
+function pick(w){
+  const slack=16/cam.z;let best=null,bs=1e9;
+  for(const e of ents){
+    const ey=isAirLike(e)?e.y-6:e.y;
+    const d=Math.hypot(w.x-e.x,w.y-ey)-e.r;
+    if(d>slack)continue;
+    const s=d+(isAirLike(e)?-8:0)+(isB(e)?10:0)+(e.cat==='res'?14:0);
+    if(s<bs){bs=s;best=e;}
+  }
+  return best;
+}
+function setGhost(sx,sy){const w=s2w(sx,sy);mode.x=Math.max(0,Math.min(W,w.x));mode.y=Math.max(0,Math.min(H,w.y));}
+cv.addEventListener('pointerdown',ev=>{
+  ev.preventDefault();
+  try{cv.setPointerCapture(ev.pointerId);}catch(e){}
+  ptrs.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(ptrs.size===1){
+    if(mode&&mode.k==='place'){G={k:'ghost'};setGhost(ev.clientX,ev.clientY);return;}
+    G={k:'pend',sx:ev.clientX,sy:ev.clientY,lx:ev.clientX,ly:ev.clientY,t0:now()};
+    if(!mode||mode.k==='attack'){const g=G;G.lp=setTimeout(()=>{if(G===g&&g.k==='pend'){g.k='circle';g.ct0=now();g.r=0;gesture('<b>按住 0.5 秒</b> → 圈選展開中，放開即選取');}},500);}
+  }else if(ptrs.size===2){
+    if(G)clearTimeout(G.lp);
+    const [a,b]=[...ptrs.values()];const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    G={k:'pinch',d0:Math.max(10,hyp(a,b)),z0:cam.z,w0:s2w(m.x,m.y)};
+    gesture(mode&&mode.k==='place'?'<b>雙指</b> → 移動鏡頭／縮放（放置中）':'<b>雙指</b> → 縮放（不會下指令）');
+  }
+});
+cv.addEventListener('pointermove',ev=>{
+  if(!ptrs.has(ev.pointerId)||!G)return;
+  ptrs.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(G.k==='ghost'&&mode&&mode.k==='place'){setGhost(ev.clientX,ev.clientY);return;}
+  if(G.k==='pinch'&&ptrs.size>=2){
+    const [a,b]=[...ptrs.values()];const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    cam.z=G.z0*hyp(a,b)/G.d0;clampCam();
+    cam.x=G.w0.x-(m.x-VW/2)/cam.z;cam.y=G.w0.y-(m.y-VH/2)/cam.z;clampCam();camAnim=null;
+  }else if(G.k==='pend'||G.k==='pan'){
+    if(G.k==='pend'&&Math.hypot(ev.clientX-G.sx,ev.clientY-G.sy)>10){
+      G.k='pan';clearTimeout(G.lp);
+      gesture(sel.size?'<b>單指拖曳</b> → 看別處（'+(SET.snap==='back'?'部隊離開畫面時，放開會跳回部隊':'放開停在原處')+'）':'<b>單指拖曳</b> → 移動鏡頭');
+    }
+    if(G.k==='pan'){cam.x-=(ev.clientX-G.lx)/cam.z;cam.y-=(ev.clientY-G.ly)/cam.z;clampCam();camAnim=null;}
+    G.lx=ev.clientX;G.ly=ev.clientY;
+  }
+});
+function endPtr(ev){
+  if(!ptrs.has(ev.pointerId))return;
+  ptrs.delete(ev.pointerId);
+  if(!G)return;
+  if(G.k==='pinch'||G.k==='dead'){if(ptrs.size===0)G=null;else G.k='dead';return;}
+  clearTimeout(G.lp);
+  if(ev.type!=='pointercancel'){
+    if(G.k==='circle')finishCircle();
+    else if(G.k==='pan'){if(sel.size&&SET.snap==='back'){const us=selEnts().filter(isMob);if(us.length&&!us.some(inView)){const c=centroid(us);camTo(c.x,c.y,160);gesture('<b>放開</b> → 部隊不在畫面內，鏡頭回到部隊');}}}
+    else if(G.k==='pend')handleTap(ev.clientX,ev.clientY);
+  }
+  G=null;
+}
+cv.addEventListener('pointerup',endPtr);cv.addEventListener('pointercancel',endPtr);
+cv.addEventListener('wheel',ev=>{ev.preventDefault();const w=s2w(ev.clientX,ev.clientY);cam.z*=Math.exp(-ev.deltaY*.0015);clampCam();cam.x=w.x-(ev.clientX-VW/2)/cam.z;cam.y=w.y-(ev.clientY-VH/2)/cam.z;clampCam();},{passive:false});
+
+function finishCircle(){
+  if(!G||G.k!=='circle')return;
+  const inC=e=>{const p=w2s(e.x,e.y);return Math.hypot(p.x-G.sx,p.y-G.sy)<=G.r+e.r*cam.z*.5;};
+  let list=own(e=>isMob(e)&&inC(e));
+  if(!list.length){const bs=own(e=>isB(e)&&inC(e));if(bs.length){const t=bs[0].type;list=bs.filter(b=>b.type===t);}}
+  const secs=((now()-G.t0)/1000).toFixed(1);
+  G.k='dead';
+  if(list.length){setSel(list);gesture('<b>圈選</b> → '+list.length+' 個單位（共 '+secs+' 秒）');}
+  else gesture('<b>圈選</b> → 圈內沒有己方單位');
+}
+
+function handleTap(sx,sy){
+  const w=s2w(sx,sy),hit=pick(w);
+  if(mode){doMode(w,hit);return;}
+  if(!sel.size){
+    if(hit&&hit.team===0)tapSelect(hit);
+    else if(hit&&hit.team===1)gesture('<b>點一下</b> → 敵方 '+nm(hit)+'（不能選取）');
+    else if(hit&&hit.cat==='res')gesture('<b>點一下</b> → 廢料堆，剩 '+hit.amt);
+    else gesture('<b>點地面</b>（沒有選取）→ 無動作');
+    return;
+  }
+  const k=selKind();
+  if(hit&&hit.team===1){
+    if(k.k==='bld'){setRally(k.es,{x:hit.x,y:hit.y});return;}
+    attackCmd(k.es,hit);gesture('<b>點敵人</b> → 攻擊 '+nm(hit));return;
+  }
+  if(hit&&hit.cat==='res'){
+    if(k.k==='worker'){gather(k.es,hit);markers.push({x:hit.x,y:hit.y,t:0,c:C.scrap,r:hit.r});gesture('<b>點廢料</b> → 工兵採集');return;}
+    if(k.k==='bld'){setRally(k.es,{x:hit.x,y:hit.y,res:hit.id});return;}
+  }
+  if(hit&&hit.team===0&&isB(hit)&&!hit.built&&FAC==='scav'&&k.k==='worker'){resumeBuild(k.es,hit);return;}
+  if(hit&&hit.team===0){tapSelect(hit);return;}
+  if(k.k==='bld'){setRally(k.es,w);return;}
+  moveCmd(k.es,w,false);
+  gesture('<b>點地面</b> → 移動（不開火）');
+}
+// 拾荒者：蓋到一半的建築沒有工兵就暫停；選工兵點它就繼續蓋
+const builderOf=b=>ents.find(w=>w.type==='worker'&&w.order.k==='build'&&w.order.bid===b.id);
+function resumeBuild(ws,b){
+  if(builderOf(b)){toast(tName(b.type)+' 已經有工兵在蓋');return;}
+  const w=ws.filter(x=>x.type==='worker').sort((a,c)=>hyp(a,b)-hyp(c,b))[0];
+  if(!w)return;
+  w.bq=[];w.order={k:'build',type:b.type,x:b.x,y:b.y,bid:b.id};
+  markers.push({x:b.x,y:b.y,t:0,c:C.accent,r:b.r});
+  gesture('<b>點未完成的建築</b> → 工兵前往繼續蓋 '+tName(b.type));
+}
+function setRally(bs,p){
+  const ok=bs.filter(b=>PROD[b.type]);
+  if(!ok.length){gesture('這個建築不生產單位，沒有集結點');return;}
+  ok.forEach(b=>b.rally=p);markers.push({x:p.x,y:p.y,t:0,c:C.accent});
+  gesture('<b>點地圖</b> → 設定集結點'+(p.res?'（新工兵會直接採集）':''));
+}
+function doMode(w,hit){
+  const k=selKind(),m=mode;
+  if(m.k==='attack'){
+    if(hit&&hit.team===1){attackCmd(k.es,hit);gesture('<b>開火中點敵人</b> → 集火 '+nm(hit));return;}
+    moveCmd(k.es,w,false);gesture('<b>點地面</b> → 停火並移動（再點攻擊就開火）');
+  }else if(m.k==='gather'){
+    if(hit&&hit.cat==='res'){gather(k.es,hit);markers.push({x:hit.x,y:hit.y,t:0,c:C.scrap,r:hit.r});gesture('<b>採集</b> → 廢料堆');}
+    else{toast('請點廢料堆','bad');return;}
+  }
+  clearMode();
+}
+function flash(el){el.classList.remove('shake');void el.offsetWidth;el.classList.add('shake');}
+
+// ---------- 小地圖 ----------
+let MM=null,prevZ=null;
+const mmWorld=ev=>{const r=mm.getBoundingClientRect();return{x:(ev.clientX-r.left)/r.width*W,y:(ev.clientY-r.top)/r.height*H};};
+mm.addEventListener('pointerdown',ev=>{ev.preventDefault();try{mm.setPointerCapture(ev.pointerId);}catch(e){}MM={sx:ev.clientX,sy:ev.clientY,drag:false};});
+mm.addEventListener('pointermove',ev=>{if(!MM)return;if(!MM.drag&&Math.hypot(ev.clientX-MM.sx,ev.clientY-MM.sy)>6){MM.drag=true;gesture('<b>按住小地圖拖曳</b> → 移動鏡頭');}
+  if(MM.drag){const w=mmWorld(ev);cam.x=w.x;cam.y=w.y;clampCam();camAnim=null;}});
+function mmUp(ev){if(!MM)return;const was=MM;MM=null;if(was.drag||ev.type==='pointercancel')return;
+  const w=mmWorld(ev);
+  if(cam.z>minZ()+.001){prevZ=cam.z;cam.z=minZ();clampCam();gesture('<b>點小地圖</b> → 縮到最大，看整張地圖');}
+  else{cam.z=prevZ||defZ();cam.x=w.x;cam.y=w.y;clampCam();gesture('<b>再點小地圖</b> → 放大回到這裡');}
+}
+mm.addEventListener('pointerup',mmUp);mm.addEventListener('pointercancel',mmUp);
+
+// ---------- HUD 按鈕 ----------
+function bindPress(el,tap,long){
+  let t=null,fired=false,down=false;
+  el.addEventListener('pointerdown',e=>{e.preventDefault();down=true;fired=false;el.classList.add('down');if(long)t=setTimeout(()=>{fired=true;el.classList.remove('down');long(el);},450);});
+  el.addEventListener('pointerup',()=>{if(!down)return;down=false;el.classList.remove('down');clearTimeout(t);if(!fired)tap(el);});
+  const cancel=()=>{down=false;clearTimeout(t);el.classList.remove('down');};
+  el.addEventListener('pointercancel',cancel);el.addEventListener('pointerleave',cancel);
+  el.addEventListener('click',e=>{if(e.detail===0)tap(el);});
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+const costTxt=c=>c?(c[0]+(c[1]?'/'+c[1]:'')):'';
+function mkBtn(d){
+  const el=document.createElement('button');
+  el.className='btn'+(d.cls?' '+d.cls:'');
+  el.innerHTML='<span class="ch">'+d.ch+'</span><span class="lb">'+d.lb+'</span>'+(d.cost?'<span class="cost">'+costTxt(d.cost)+'</span>':'')+'<span class="badge"></span><span class="cdov"></span>';
+  el.setAttribute('aria-label',d.lb);
+  bindPress(el,()=>d.onTap&&d.onTap(el),d.onLong?()=>d.onLong(el):null);
+  el._d=d;return el;
+}
+
+// 彈出選單
+let popAnchor=null;
+const pop=$('#pop');
+function openPop(anchor,render){popAnchor=anchor;pop.hidden=false;render(pop);placePop();document.querySelectorAll('.cat').forEach(c=>c.classList.toggle('open',c===anchor));}
+function placePop(){if(!popAnchor)return;const r=popAnchor.getBoundingClientRect(),pw=pop.offsetWidth,ar=$('#app').getBoundingClientRect();
+  pop.style.left=Math.max(8,Math.min(VW-pw-8,r.left-ar.left+r.width/2-pw/2))+'px';pop.style.bottom=(ar.bottom-r.top+8)+'px';pop.style.top='auto';}
+function closePop(){if(pop.hidden)return;pop.hidden=true;popAnchor=null;document.querySelectorAll('.cat').forEach(c=>c.classList.remove('open'));}
+document.addEventListener('pointerdown',ev=>{
+  if(pop.hidden)return;
+  if(pop.contains(ev.target)||(popAnchor&&popAnchor.contains(ev.target)))return;
+  const wasCat=popAnchor&&popAnchor.classList.contains('cat');
+  closePop();
+  // 分類選單：點地圖會關閉選單，同時照常執行這一點（例如直接下移動指令）；其他選單的關閉點擊不作用
+  if(ev.target===cv&&!wasCat)ev.stopPropagation();
+},true);
+function row(html,onTap,cls){const b=document.createElement('button');b.className='prow'+(cls?' '+cls:'');b.innerHTML=html;bindPress(b,onTap);return b;}
+const icT=(t,ch)=>'<span class="ic'+(TY[t].cat==='building'||t==='pack'?' sq':'')+'">'+(ch||tCh(t))+'</span>';
+
+// 左下分類（選取後鏡頭跳過去）
+function buildCats(){
+  const box=$('#cats');box.innerHTML='';
+  CATS.forEach(([cat,ch,lb])=>{
+    box.appendChild(mkBtn({ch,lb,cls:'cat',onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,p=>renderCat(p,cat));}}));
+  });
+}
+function selectAndJump(list,key,msg,keepPop){setSel(list,false,keepPop);const extra=jumpTo(list,key);gesture(msg+extra);}
+const sameSel=l=>l.length&&l.length===sel.size&&l.every(e=>sel.has(e.id));
+// 分類選單選取後不關閉：再點同一項跳下一群，點別項直接換選；點分類鈕或畫面其他地方才關閉
+function renderCat(p,cat){
+  const title=CATS.find(c=>c[0]===cat)[2];
+  p.innerHTML='<div class="ptitle">'+title+'</div>';
+  const g=document.createElement('div');g.className='bgrid';
+  const pick=(l,key,msg)=>{selectAndJump(l,key,'<b>分類選單</b> → '+msg,true);renderCat(p,cat);placePop();};
+  // 一格：圖示 + 數量；數量為 0 的格子變暗、不能點
+  const tile=(ch,l,key,label,o)=>{o=o||{};
+    const b=document.createElement('button');b.className='btile'+(l.length?'':' poor')+(sameSel(l)?' cur':'');b.setAttribute('aria-label',label);
+    b.innerHTML='<span class="bi'+(o.round?' rd':'')+(o.pack?' pk':'')+'">'+ch+'</span><span class="bc">'+l.length+(o.note?'<em>'+o.note+'</em>':'')+'</span>';
+    if(l.length)bindPress(b,()=>pick(l,key,label+'×'+l.length));
+    g.appendChild(b);};
+  if(cat==='worker'){
+    const ws=own(e=>e.type==='worker'),idle=ws.filter(e=>e.order.k==='idle'),dr=own(e=>e.type==='drone');
+    tile('工',ws,'cat:w','全部工兵',{round:true});
+    tile('閒',idle,'cat:wi','閒置工兵',{round:true});
+    if(FAC==='mech')tile('氣',dr,'cat:d','無人機',{round:true});
+  }else if(cat==='building'){
+    const list=own(e=>isB(e)||e.cat==='pack');const m=countBy(list);
+    m.forEach((n,k)=>{const l=list.filter(e=>(e.type==='pack'?'pack:'+e.ptype:e.type)===k);
+      const isPack=k.startsWith('pack:'),t=isPack?k.slice(5):k;
+      const busy=l.some(b=>b.q.length||b.bq.length),off=FAC==='vine'&&l.some(b=>!b.conn);
+      tile(tCh(t),l,'cat:'+k,keyName(k),{pack:isPack,note:off?'斷':busy?'產':''});});
+  }else{
+    const list=own(e=>e.cat===cat);const m=countBy(list);
+    tile('全',list,'cat:all'+cat,'全部'+title);
+    m.forEach((n,t)=>tile(TY[t].ch,list.filter(e=>e.type===t),'cat:'+t,TY[t].name,{round:true}));
+  }
+  if(!g.children.length)g.innerHTML='<div class="phint">目前沒有</div>';
+  p.appendChild(g);
+}
+
+// 中下編隊（選取後鏡頭跳過去）
+const slotEls=[];
+function buildSlots(){
+  const box=$('#slots');box.innerHTML='';slotEls.length=0;
+  for(let i=0;i<5;i++){
+    const el=document.createElement('button');el.className='slot';el.setAttribute('aria-label','編隊 '+(i+1));
+    bindPress(el,()=>slotTap(i),()=>slotAdd(i));
+    box.appendChild(el);slotEls.push(el);
+  }
+}
+const grpOf=e=>isB(e)?'b:'+e.type:e.cat==='pack'?'pack':isCombat(e)?'army':e.cat;
+function compat(list){
+  if(!list.length)return{ok:true};
+  const g=new Set(list.map(grpOf));
+  if(g.size===1)return{ok:true};
+  if([...g].every(x=>x.startsWith('b:')))return{ok:false,why:'建築只能跟同種建築編隊'};
+  if(g.has('worker'))return{ok:false,why:'工兵只能跟工兵編隊'};
+  return{ok:false,why:'不同類型不能編在一起'};
+}
+const slotEnts=i=>slots[i].map(id=>byId.get(id)).filter(Boolean);
+// 單位只屬於一個編隊：存入新編隊時從其他編隊移出；舊編隊只剩其他單位就保留，空了就清掉
+function assignSlot(i,ids){
+  const set=new Set(ids),from=[];
+  slots.forEach((s,k)=>{if(k===i)return;const n=s.filter(id=>!set.has(id));if(n.length!==s.length){from.push(k+1);slots[k]=n;}});
+  slots[i]=ids;
+  return from.length?'（從編隊 '+from.join('、')+' 移過來）':'';
+}
+// 編隊格：點一下選這組（空格則存入）、快速連點兩下開管理視窗、長按直接加入目前選取
+let slotTapT={i:-1,t:0};
+function slotAdd(i){
+  const cur=selEnts(),s=slotEnts(i);
+  if(!cur.length){toast('先選取單位，再長按編隊格加入');return;}
+  const ins=new Set(slots[i]);
+  if(cur.every(e=>ins.has(e.id))){toast('這些單位已經在編隊 '+(i+1));return;}
+  const uni=[...s,...cur.filter(e=>!ins.has(e.id))];
+  const c=compat(uni);
+  if(!c.ok){toast('不能加入：'+c.why,'bad');flash(slotEls[i]);return;}
+  const mv=assignSlot(i,uni.map(e=>e.id));
+  toast((s.length?'已加入編隊 ':'已存入編隊 ')+(i+1)+'（共 '+uni.length+'）'+mv);
+  gesture('<b>長按編隊 '+(i+1)+'</b> → 加入目前選取');refreshAll();
+}
+function slotTap(i){
+  const t=now();
+  if(slotTapT.i===i&&t-slotTapT.t<330){slotTapT={i:-1,t:0};openSlotPop(i);return;}
+  slotTapT={i,t};
+  const s=slotEnts(i),cur=selEnts();
+  const recall=()=>{setSel(s,true);const extra=jumpTo(s,'slot:'+i);gesture('<b>點編隊 '+(i+1)+'</b> → 選取 '+s.length+' 個'+extra);};
+  if(!cur.length){
+    if(!s.length){toast('編隊 '+(i+1)+' 是空的：先選取單位，再點這格存入');return;}
+    recall();return;
+  }
+  if(!s.length){
+    const c=compat(cur);if(!c.ok){toast(c.why,'bad');flash(slotEls[i]);return;}
+    const mv=assignSlot(i,cur.map(e=>e.id));toast('已存入編隊 '+(i+1)+'（'+cur.length+'）'+mv);gesture('<b>點空格</b> → 存入編隊');refreshAll();return;
+  }
+  // 有單位的編隊格：點一下一律是選這組；加入、取代在長按選單裡
+  recall();
+}
+function openSlotPop(i){
+  closePop();
+  gesture('<b>連點編隊 '+(i+1)+'</b> → 管理');
+  const render=p=>{
+    const s=slotEnts(i);
+    p.innerHTML='<div class="ptitle">編隊 '+(i+1)+'・'+s.length+' 個</div>';
+    if(s.length){const ch=document.createElement('div');ch.className='chips';
+      s.forEach(e=>{const b=document.createElement('button');b.className='chip';b.setAttribute('aria-label','移出 '+nm(e));
+        b.innerHTML=chOf(e)+'<i style="right:'+(4+26*(1-e.hp/e.maxHp))+'px"></i>';
+        bindPress(b,()=>{slots[i]=slots[i].filter(id=>id!==e.id);render(p);placePop();refreshAll();});ch.appendChild(b);});
+      p.appendChild(ch);
+      const h=document.createElement('div');h.className='phint';h.textContent='點單位就移出這個編隊';p.appendChild(h);
+    }else{const h=document.createElement('div');h.className='phint';h.textContent='空的編隊。選取單位後點這格存入。';p.appendChild(h);}
+    const a=document.createElement('div');a.className='prow-actions';a.style.marginTop='8px';
+    const mk=(t,f,cls)=>{const b=document.createElement('button');b.className='pbtn'+(cls?' '+cls:'');b.textContent=t;bindPress(b,f);a.appendChild(b);};
+    const cur=selEnts(),same=cur.length===s.length&&cur.every(e=>slots[i].includes(e.id));
+    if(cur.length&&!same){
+      if(s.length)mk('⇄ 改成目前選取',()=>{const c=compat(cur);if(!c.ok){toast(c.why,'bad');return;}const mv=assignSlot(i,cur.map(e=>e.id));toast('編隊 '+(i+1)+' 改成目前選取（'+cur.length+'）'+mv);gesture('<b>長按編隊 '+(i+1)+' → 取代</b>');closePop();refreshAll();},'pri');
+    }
+    if(i>0)mk('◀ 左移',()=>{[slots[i-1],slots[i]]=[slots[i],slots[i-1]];refreshAll();openSlotPop(i-1);});
+    if(i<4)mk('右移 ▶',()=>{[slots[i+1],slots[i]]=[slots[i],slots[i+1]];refreshAll();openSlotPop(i+1);});
+    if(s.length)mk('全部移除',()=>{slots[i]=[];refreshAll();closePop();toast('編隊 '+(i+1)+' 已清空');},'warn');
+    p.appendChild(a);
+  };
+  openPop(slotEls[i],render);
+}
+function renderSlots(){
+  const cur=[...sel].sort().join(',');
+  slotEls.forEach((el,i)=>{
+    const s=slotEnts(i);
+    if(!s.length){el.className='slot';el.innerHTML='<span class="num">'+(i+1)+'</span><span class="plus">+</span>';return;}
+    const m=countBy(s);let ch='軍';if(m.size===1)ch=chOf(s[0]);else if(s.every(e=>e.cat==='ground'))ch='地';else if(s.every(e=>e.cat==='air'))ch='空';
+    el.className='slot full'+(cur&&cur===slots[i].slice().sort().join(',')?' active':'');
+    el.innerHTML='<span class="num">'+(i+1)+'</span><span class="ch">'+ch+'</span><span class="cnt">'+s.length+'</span>';
+  });
+}
+
+// 右下指令：defs[0] 是大圓鈕，其餘 defs 與技能沿圓弧排在旁邊
+let cmdSig='',cmdBtns=[];
+function cmdDefs(){
+  const k=selKind(),defs=[];let skills=[];
+  if(mode&&mode.k==='place'){
+    const T=TY[mode.type],cost=FAC==='mech'?null:T.cost;
+    defs.push({ch:'✓',lb:'確認',cls:'go',cost,place:true,onTap:()=>confirmPlace(false)});
+    defs.push({ch:'連',lb:'連續建造',place:true,onTap:()=>confirmPlace(true)});
+    defs.push({ch:'✕',lb:'取消',onTap:()=>{clearMode();refreshAll();gesture('<b>取消</b> → 離開放置模式');}});
+    return{k,defs,skills,place:true};
+  }
+  if(k.k==='none')return{k,defs:[{ch:'－',lb:'未選取',cls:'placeholder'}],skills};
+  if(k.k==='worker'){
+    if(!k.es.some(e=>e.type==='worker'))return{k,defs:[{ch:'氣',lb:'自動採氣中',cls:'placeholder'}],skills};
+    defs.push({ch:'採',lb:'採集',on:()=>mode&&mode.k==='gather',onTap:()=>setMode({k:'gather'},'採集：點廢料堆')});
+    defs.push({ch:'攻',lb:'攻擊',on:()=>mode&&mode.k==='attack',onTap:()=>setMode({k:'attack'},'攻擊：點敵人')});
+    if(FAC==='scav')defs.push({ch:'建',lb:'建造',onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,p=>renderBuild(p,'place'));}});
+  }else if(k.k==='pack'){
+    defs.push({ch:'展',lb:'部署',onTap:()=>{const p=selEnts().find(e=>e.order.k!=='deploy'&&e.order.k!=='deploying')||selEnts()[0];if(!p)return;enterPlace(p.ptype,p.id);gesture('<b>部署</b> → 選位置後確認，會自己移動過去展開');}});
+  }else if(k.k==='army'){
+    defs.push({ch:'攻',lb:'攻擊',on:()=>isFiring(selEnts()),onTap:()=>armyAttack(selEnts()),label:()=>isFiring(selEnts())?'開火中':'攻擊'});
+    const types=[...new Set(k.es.map(e=>e.type))].filter(t=>TY[t]&&TY[t].skill);
+    skills=types.map(t=>{const S=TY[t].skill;return{ch:S.name.slice(0,1),lb:S.name,type:t,onTap:()=>castSkill(t),
+      cdf:()=>{const us=selEnts().filter(e=>e.type===t);if(!us.length)return 0;return Math.min(...us.map(e=>e.scd))/S.cd;},
+      on:()=>S.id==='siege'&&selEnts().filter(e=>e.type===t).every(e=>e.sieged)};});
+  }else{
+    const bs=k.es,t=k.type;
+    if(bs.every(b=>!b.built)){defs.push({ch:'✕',lb:FAC==='vine'?'取消生長':'取消建造',onTap:()=>cancelBuild(bs)});return{k,defs,skills};}
+    (PROD[t]||[]).forEach(u=>defs.push({ch:TY[u].ch,lb:TY[u].name,cost:TY[u].cost,unit:u,cdf:()=>qRem(q=>q.kind==='unit'&&q.type===u),onTap:()=>{if(produce(selKind().es,u))gesture('<b>點</b> → 生產 '+TY[u].name+'（長按可循環生產）');},
+      onLong:()=>{const es=selKind().es.filter(b=>b.built);const all=es.every(b=>b.loop===u);es.forEach(b=>b.loop=all?null:u);toast(all?'已關閉循環生產':'循環生產 '+TY[u].name+'：佇列空了就自動補');gesture('<b>長按</b> → 循環生產');}}));
+    if(t==='base'&&FAC!=='scav')defs.push({ch:FAC==='vine'?'長':'建',lb:FAC==='vine'?'生長':'建造',cdf:()=>FAC==='mech'?qRem(()=>true,'bq'):0,onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,p=>renderBuild(p,FAC==='vine'?'place':'queue'));}});
+    if(UPG[t])defs.push({ch:'升',lb:'升級',cost:UPG[t].cost,upg:true,cdf:()=>qRem(q=>q.kind==='upg'),onTap:()=>upgrade(selKind().es)});
+    if(t==='base')defs.push({ch:'召',lb:'閒置回採',onTap:()=>{const idle=own(e=>e.type==='worker'&&e.order.k==='idle');idle.forEach(w=>gather([w],nearestRes(w)));toast(idle.length?idle.length+' 個閒置工兵回去採集':'沒有閒置工兵');}});
+    if(t==='turret'||t==='depot'||t==='pump'||t==='lung'){defs.push({ch:'修',lb:'維修',cost:[25,0],onTap:()=>repair(selKind().es)});defs.push({ch:'拆',lb:'拆除',onTap:()=>demolish(selKind().es)});}
+  }
+  // 技能 5 個以內全部顯示；6 個以上：每頁 4 技 + 換（圓弧最下面那格）
+  if(skills.length>5){
+    const pages=Math.ceil(skills.length/4);skillPage%=pages;
+    const pageSk=skills.slice(skillPage*4,skillPage*4+4);
+    skills=[{ch:'換',lb:(skillPage+1)+'/'+pages,cls:'swap',onTap:()=>{skillPage=(skillPage+1)%pages;refreshCmds(true);gesture('<b>換</b> → 技能第 '+(skillPage+1)+' 頁');}},...pageSk];
+  }
+  return{k,defs,skills};
+}
+// 選取建築佇列中符合條件、進度最快那一項的剩餘比例（0 表示沒有在生產）
+function qRem(pred,key){
+  const k=selKind();if(k.k!=='bld')return 0;
+  let best=-1;k.es.forEach(b=>{const q=b[key||'q'][0];if(q&&pred(q))best=Math.max(best,q.t/q.total);});
+  return best<0?0:1-best;
+}
+// 次要按鈕沿大圓鈕左方（180°）到正上方（270°）的圓弧排列；數量多時加大半徑避免重疊
+function layoutArc(prim,secs){
+  if(!secs.length)return;
+  const big=prim.offsetWidth,k=secs[0].offsetWidth,n=secs.length;
+  const step=n<=3?45:90/(n-1);
+  const minR=big/2+k/2+8,arcR=n>1?(k+6)/(2*Math.sin(step*Math.PI/360)):0;
+  const R=Math.max(minR,arcR);
+  secs.forEach((el,i)=>{const a=(180+step*i)*Math.PI/180;
+    el.style.left=(big/2+Math.cos(a)*R-k/2)+'px';el.style.top=(big/2+Math.sin(a)*R-k/2)+'px';});
+}
+function renderBuild(p,how){
+  p.innerHTML='<div class="ptitle">'+(FAC==='vine'?'生長':FAC==='mech'?'主堡生成・一次一棟':'建造')+'</div>';
+  const g=document.createElement('div');g.className='bgrid';
+  BUILDS[FAC].forEach(t=>{const T=TY[t];
+    const b=document.createElement('button');b.className='btile'+(afford(T.cost)?'':' poor');b.setAttribute('aria-label',tName(t));
+    b.innerHTML='<span class="bi">'+tCh(t)+'</span><span class="bc"><i class="ico s"></i>'+T.cost[0]+(T.cost[1]?'<i class="ico g"></i>'+T.cost[1]:'')+'</span>';
+    bindPress(b,()=>{
+      if(!afford(T.cost)){toast(tName(t)+'：'+(res.s<T.cost[0]?'廢料不足':'輻能氣不足'),'bad');return;}
+      closePop();
+      if(how==='queue'){queueBuilding(selKind().es,t);return;}
+      mode=null;enterPlace(t,null);
+    });
+    g.appendChild(b);});
+  p.appendChild(g);
+}
+function refreshCmds(force){
+  const d=cmdDefs();
+  const sig=(d.place?'place:'+mode.type:'')+'|'+d.k.k+'|'+(d.k.type||'')+'|'+d.defs.map(x=>x.lb).join(',')+'|'+d.skills.map(x=>x.lb).join(',');
+  if(force||sig!==cmdSig){
+    cmdSig=sig;
+    const box=$('#cmdArea');box.innerHTML='';
+    cmdBtns=[];
+    const all=[...d.defs,...d.skills].map((x,i)=>{const b=mkBtn(Object.assign({},x,{cls:(x.cls||'')+(i?' sec':' prim')+(x.cost?' hascost':'')}));box.appendChild(b);cmdBtns.push(b);return b;});
+    layoutArc(all[0],all.slice(1));
+  }
+  updCmds();
+}
+function updCmds(){
+  const k=selKind();
+  cmdBtns.forEach(b=>{const d=b._d;
+    b.classList.toggle('on',!!(d.on&&d.on()));
+    if(d.cost)b.classList.toggle('poor',!afford(d.cost));
+    if(d.place&&mode&&mode.k==='place')b.classList.toggle('off',!placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null).ok||(FAC!=='mech'&&!afford(TY[mode.type].cost)));
+    let badge='';
+    if(d.unit&&k.k==='bld'){const n=k.es.reduce((s,x)=>s+x.q.filter(q=>q.type===d.unit).length,0);const lp=k.es.some(x=>x.loop===d.unit);badge=(lp?'∞':'')+(n?n:'');}
+    if(d.upg&&k.k==='bld'){const U=UPG[k.type];const lv=U.team?U.lv():Math.min(...k.es.map(x=>x.lvl));badge='Lv'+(U.team?lv+1:lv);}
+    b.querySelector('.badge').textContent=badge;
+    if(d.label)b.querySelector('.lb').textContent=d.label();
+    // 指針式倒數：從 12 點鐘方向順時針掃過，未完成的部分蓋暗
+    const rem=d.cdf?Math.max(0,Math.min(1,d.cdf())):0,ov=b.querySelector('.cdov');
+    if(rem>0){const p=((1-rem)*100).toFixed(1),h=Math.min(100,(1-rem)*100+1.5).toFixed(1);ov.style.background='conic-gradient(transparent 0 '+p+'%,var(--accent) '+p+'% '+h+'%,rgba(0,0,0,.58) '+h+'% 100%)';}
+    else ov.style.background='none';
+  });
+}
+
+function renderSelInfo(){
+  const es=selEnts(),el=$('#selInfo');
+  if(mode&&mode.k==='place'){el.innerHTML='<b>放置 '+tName(mode.type)+'</b>・單指移動建築・雙指移動鏡頭';return;}
+  if(!es.length){el.innerHTML=FACS[FAC].name+'・未選取';return;}
+  const k=selKind();
+  if(k.k==='bld'){const b=k.es;const off=b.some(x=>FAC==='vine'&&!x.conn);
+    const items=[];
+    b.forEach(x=>{x.q.forEach((q,i)=>items.push({ch:q.kind==='upg'?'升':TY[q.type].ch,p:i===0?q.t/q.total:-1}));
+      x.bq.forEach((q,i)=>items.push({ch:TY[q.type].ch,p:i===0?q.t/q.total:-1,bld:true}));});
+    items.sort((a,c)=>c.p-a.p);
+    const chips=items.slice(0,8).map(it=>'<span class="qc'+(it.p>=0?' run':'')+(it.bld?' qb':'')+'"'+(it.p>=0?' style="background:conic-gradient(var(--accent) 0 '+(it.p*100).toFixed(1)+'%,rgba(255,255,255,.1) '+(it.p*100).toFixed(1)+'% 100%)"':'')+'><i>'+it.ch+'</i></span>').join('')+(items.length>8?' +'+(items.length-8):'');
+    el.innerHTML='<b>'+tName(k.type)+'</b> ×'+b.length+(k.type==='base'&&b[0].built?'・採集工兵 '+minersOf(b[0])+'/'+MINE_CAP:'')+(b.some(x=>!x.built)?'・'+(FAC==='vine'?'生長中 ':FAC==='scav'&&!builderOf(b[0])?'暫停 ':'建造中 ')+Math.round(b[0].prog*100)+'%'+(FAC==='scav'&&!builderOf(b[0])?'（選工兵點這棟繼續蓋）':''):'')+(off?'・<span style="color:var(--bad)">斷線</span>':'')+(items.length?'・生產中'+chips:(PROD[k.type]?'・點地圖設集結點':''));return;}
+  const m=countBy(es);
+  el.innerHTML=[...m].map(([t,n])=>'<b>'+keyName(t)+'</b>×'+n).join('・');
+}
+function refreshHUD(){
+  $('#rs').textContent=Math.floor(res.s);$('#rg').textContent=Math.floor(res.g);$('#rgr').textContent=' +'+gasRate.toFixed(1)+'/s';
+  const pu=popUsed(),pc=popCap();$('#pu').textContent=pu;$('#pc').textContent=pc;$('#popEl').classList.toggle('full',pu>=pc);
+  const idle=own(e=>e.type==='worker'&&e.order.k==='idle').length;
+  $('#btnIdle').innerHTML='閒'+(idle?'<span class="bdg">'+idle+'</span>':'');
+  const un=events.length;
+  $('#evBtn').innerHTML='<span class="ch">!</span><span class="lb">事件</span>'+(un?'<span class="bdg">'+un+'</span>':'');
+  $('#evBtn').classList.toggle('hot',un>0);
+  renderSelInfo();renderSlots();updCmds();
+}
+function refreshAll(force){refreshCmds(force);refreshHUD();}
+
+const onTapEl=(id,f)=>bindPress($('#'+id),f);
+onTapEl('btnClear',()=>{setSel([],true);gesture('<b>✕</b> → 取消選取');});
+onTapEl('btnArmy',()=>{const l=own(isCombat);if(!l.length){toast('沒有部隊');return;}selectAndJump(l,'army','<b>全部部隊</b> → '+l.length+' 個（地面＋空軍，不含工兵）');});
+onTapEl('btnIdle',()=>{const l=own(e=>e.type==='worker'&&e.order.k==='idle');if(!l.length){toast('沒有閒置工兵');return;}selectAndJump(l,'idle','<b>閒置工兵</b> → '+l.length+' 個');});
+onTapEl('evBtn',eventJump);
+
+// 種族選擇與設定
+function renderFacPick(){
+  const box=$('#facPick');box.innerHTML='';
+  Object.entries(FACS).forEach(([k,f])=>{const b=document.createElement('button');b.className='fac'+(SET.faction===k?' sel':'');
+    b.innerHTML='<b>'+f.name+'</b><span>'+f.desc+'</span>';
+    b.addEventListener('click',()=>{SET.faction=k;saveSet();renderFacPick();});box.appendChild(b);});
+}
+function renderSet(){
+  const box=$('#setList');box.innerHTML='';
+  SETDEF.forEach(([k,label,opts])=>{
+    const r=document.createElement('div');r.className='setrow';
+    r.innerHTML='<div class="k">'+label+'</div>';
+    const seg=document.createElement('div');seg.className='seg';
+    opts.forEach(([v,t,tag])=>{const b=document.createElement('button');b.className=SET[k]===v?'sel':'';b.innerHTML=t+(tag?'<span class="tag">'+tag+'</span>':'');
+      b.addEventListener('click',()=>{const was=SET[k];SET[k]=v;saveSet();renderSet();if((k==='faction'||k==='start')&&was!==v){reset();toast(k==='faction'?'已換成 '+FACS[v].name:'已重新開局');}else refreshAll(true);});seg.appendChild(b);});
+    r.appendChild(seg);box.appendChild(r);
+  });
+}
+// 全螢幕：部分環境（例如 App 內的檢視器）不允許，失敗就提示改用手機瀏覽器開啟
+$('#btnFs').addEventListener('click',()=>{
+  const d=document,el=d.documentElement;
+  if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d);return;}
+  const req=el.requestFullscreen||el.webkitRequestFullscreen;
+  const fail=()=>toast('這個檢視環境不支援全螢幕，可以改用手機瀏覽器開啟這個頁面','bad');
+  if(!req){fail();return;}
+  try{const r=req.call(el,{navigationUI:'hide'});
+    if(r&&r.then)r.then(()=>{try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}setTimeout(resize,200);}).catch(fail);}
+  catch(e){fail();}
+});
+$('#btnSet').addEventListener('click',()=>{renderSet();$('#setSheet').hidden=false;});
+$('#btnSetClose').addEventListener('click',()=>{$('#setSheet').hidden=true;});
+$('#btnReset').addEventListener('click',()=>{reset();$('#setSheet').hidden=true;toast('戰場已重置');});
+$('#btnHelp').addEventListener('click',()=>{$('#helpSheet').hidden=false;});
+$('#btnIntroHelp').addEventListener('click',()=>{$('#helpSheet').hidden=false;});
+$('#btnHelpClose').addEventListener('click',()=>{$('#helpSheet').hidden=true;});
+$('#btnGo').addEventListener('click',()=>{$('#intro').hidden=true;resize();if(FAC!==SET.faction)reset();toast(FACS[FAC].name+'：'+FACS[FAC].desc);});
+['gesturestart','gesturechange'].forEach(t=>document.addEventListener(t,e=>e.preventDefault()));
+document.addEventListener('contextmenu',e=>e.preventDefault());
+
+// ---------- 主迴圈 ----------
+let last=now(),hudT=0;
+function frame(){
+  const t=now();const dt=Math.min(.05,(t-last)/1000);last=t;
+  if($('#intro').hidden&&$('#setSheet').hidden&&$('#helpSheet').hidden)step(dt);
+  if(camAnim){const k=Math.min(1,(t-camAnim.t0)/camAnim.ms),e=1-Math.pow(1-k,3);cam.x=camAnim.fx+(camAnim.tx-camAnim.fx)*e;cam.y=camAnim.fy+(camAnim.ty-camAnim.fy)*e;clampCam();if(k>=1)camAnim=null;}
+  if(G&&G.k==='circle'){const maxR=Math.min(VW,VH)*.42;G.r=Math.min(maxR,maxR*(t-G.ct0)/930);if(G.r>=maxR)finishCircle();}
+  if(toastT>0){toastT-=dt;if(toastT<=0)$('#toast').style.opacity=0;}
+  if(gestT>0){gestT-=dt;if(gestT<=0)$('#gest').style.opacity=0;}
+  hudT-=dt;if(hudT<=0){hudT=.12;refreshHUD();refreshCmds(false);}
+  draw();
+  requestAnimationFrame(frame);
+}
+window.addEventListener('resize',()=>{resize();placePop();refreshCmds(true);});
+buildCats();buildSlots();renderFacPick();resize();reset();
+window.__rts={get ents(){return ents},get mode(){return mode},get res(){return res},get sel(){return [...sel]},get cam(){return cam},w2s};
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
