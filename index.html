@@ -117,6 +117,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cmdArea .btn .cost{position:static;font-size:9px}
 #cmdArea .btn.hascost .lb{display:none}
 #cmdArea .btn .badge{left:50%;top:4px;transform:translateX(-50%);font-size:9px}
+#cmdArea.grid{width:auto;height:auto;display:grid;gap:6px}
+#cmdArea.grid .btn{position:relative;left:auto;top:auto;width:var(--b);height:var(--b);border-radius:12px;padding-top:8px}
+#cmdArea.grid .btn .ch{font-size:calc(var(--b) * .32)}
+#cmdArea.grid .btn.hascost .lb{display:none}
+#cmdArea.grid .btn .badge{left:4px;top:3px;transform:none}
 #cmdArea .btn.sec{padding-top:10px}
 #cmdArea .btn.prim{padding-top:6px}
 
@@ -643,11 +648,6 @@ function clearMode(){mode=null;const t=$('#toast');if(t.className==='mode'){t.st
 // 攻擊鈕是開關：開火（自動找附近敵人，可再點敵人集火）／停火；點地面一律是移動，用來甩打
 const isFiring=es=>(mode&&mode.k==='attack')||es.some(e=>isCombat(e)&&e.order.k==='attack');
 function armyAttack(es){
-  if(isFiring(es)){
-    es.forEach(e=>{if(isCombat(e)&&e.order.k==='attack')e.order={k:'hold'};});
-    if(mode)clearMode();
-    toast('停火');gesture('<b>再點攻擊</b> → 停火');refreshCmds(true);return;
-  }
   let n=0;
   es.forEach(e=>{if(!isCombat(e)||!TY[e.type].dmg)return;const t=acquire(e,TY[e.type].range*(e.sieged?1.8:1)+150);if(t){e.order={k:'attack',tid:t.id,auto:true};n++;}});
   mode={k:'attack'};
@@ -685,7 +685,7 @@ function confirmPlace(cont){
     ws.sort((a,b)=>load(a)-load(b)||hyp(a,m)-hyp(b,m));
     const w=ws[0],job={type:m.type,x:m.x,y:m.y};
     if(w.order.k==='build')w.bq.push(job);else{w.bq=[];w.order=Object.assign({k:'build'},job);}
-    pend.push({x:m.x,y:m.y,r:T.r,uid:w.id});
+    pend.push({x:m.x,y:m.y,r:T.r,uid:w.id,type:m.type});
     gesture('<b>確認</b> → 工兵前往建造 '+T.name);
   }else if(FAC==='vine'){
     if(!pay(T.cost))return;
@@ -697,7 +697,7 @@ function confirmPlace(cont){
     const p=byId.get(m.src);
     if(!p){clearMode();return;}
     p.order={k:'deploy',x:m.x,y:m.y};
-    pend.push({x:m.x,y:m.y,r:T.r,uid:p.id});
+    pend.push({x:m.x,y:m.y,r:T.r,uid:p.id,type:m.type});
     gesture('<b>確認</b> → '+T.name+' 移動過去展開');
   }
   markers.push({x:m.x,y:m.y,t:0,c:C.accent,r:T.r});
@@ -1232,6 +1232,11 @@ function draw(){
     ctx.fillStyle='#1d221b';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=e.hasteT>0||e.spdT>0||e.dmgT>0?4:2.5;ctx.stroke();ctx.restore();
     label(TY[e.type].ch,e.x-2,e.y-6,e.r*.8,col);}
   for(const e of ents){if(e.cat==='res')continue;if(sel.has(e.id)||e.hp<e.maxHp)hpBar(e);}
+  // 已確認、工兵還沒開工的建築：灰色預覽（遺械的待部署建築另外畫預定位置）
+  for(const q of pend){const u=byId.get(q.uid);if(!u||u.type==='pack'||!q.type)continue;
+    ctx.globalAlpha=.35;bPath(FACS[FAC].shape,q.x,q.y,q.r);ctx.fillStyle='#8a8a8a';ctx.fill();ctx.globalAlpha=1;
+    ctx.strokeStyle='#9a9a9a';ctx.lineWidth=2;ctx.setLineDash([6,5]);bPath(FACS[FAC].shape,q.x,q.y,q.r);ctx.stroke();ctx.setLineDash([]);
+    label(tCh(q.type),q.x,q.y,q.r*.8,'#c8c8c8');}
   // 放置中的半透明建築
   if(placing){
     const T=TY[mode.type],ck=placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null),col=ck.ok?C.ok:C.bad;
@@ -1337,7 +1342,7 @@ function finishCircle(){
 
 function handleTap(sx,sy){
   const w=s2w(sx,sy),hit=pick(w);
-  if(mode){doMode(w,hit);return;}
+  if(mode){if(hit&&hit.team===0&&(mode.k==='attack'||mode.k==='gather'))clearMode();else{doMode(w,hit);return;}}
   if(!sel.size){
     if(hit&&hit.team===0)tapSelect(hit);
     else if(hit&&hit.team===1)gesture('<b>點一下</b> → 敵方 '+nm(hit)+'（不能選取）');
@@ -1385,7 +1390,7 @@ function doMode(w,hit){
   const k=selKind(),m=mode;
   if(m.k==='attack'){
     if(hit&&hit.team===1){attackCmd(k.es,hit);gesture('<b>開火中點敵人</b> → 集火 '+nm(hit));return;}
-    moveCmd(k.es,w,false);gesture('<b>點地面</b> → 停火並移動（再點攻擊就開火）');
+    moveCmd(k.es,w,false);gesture('<b>點地面</b> → 移動（再點攻擊就開火）');
   }else if(m.k==='gather'){
     if(hit&&hit.cat==='res'){gather(k.es,hit);markers.push({x:hit.x,y:hit.y,t:0,c:C.scrap,r:hit.r});gesture('<b>採集</b> → 廢料堆');}
     else{toast('請點廢料堆','bad');return;}
@@ -1601,7 +1606,7 @@ function cmdDefs(){
   }else if(k.k==='pack'){
     defs.push({ch:'展',lb:'部署',onTap:()=>{const p=selEnts().find(e=>e.order.k!=='deploy'&&e.order.k!=='deploying')||selEnts()[0];if(!p)return;enterPlace(p.ptype,p.id);gesture('<b>部署</b> → 選位置後確認，會自己移動過去展開');}});
   }else if(k.k==='army'){
-    defs.push({ch:'攻',lb:'攻擊',on:()=>isFiring(selEnts()),onTap:()=>armyAttack(selEnts()),label:()=>isFiring(selEnts())?'開火中':'攻擊'});
+    defs.push({ch:'攻',lb:'攻擊',on:()=>isFiring(selEnts()),onTap:()=>armyAttack(selEnts())});
     const types=[...new Set(k.es.map(e=>e.type))].filter(t=>skillOf(t));
     skills=types.map(t=>{const S=skillOf(t);return{ch:S.name.slice(0,1),lb:S.name,type:t,onTap:()=>castSkill(t),
       cdf:()=>{const us=selEnts().filter(e=>e.type===t);if(!us.length)return 0;return Math.min(...us.map(e=>e.scd))/S.cd;},
@@ -1668,8 +1673,11 @@ function refreshCmds(force){
     cmdSig=sig;
     const box=$('#cmdArea');box.innerHTML='';
     cmdBtns=[];
-    const all=[...d.defs,...d.skills].map((x,i)=>{const b=mkBtn(Object.assign({},x,{cls:(x.cls||'')+(i?' sec':' prim')+(x.cost?' hascost':'')}));box.appendChild(b);cmdBtns.push(b);return b;});
-    layoutArc(all[0],all.slice(1));
+    const grid=d.k.k==='bld'&&!d.place;
+    box.classList.toggle('grid',grid);
+    box.style.gridTemplateColumns=grid?'repeat('+Math.min(3,d.defs.length)+',var(--b))':'';
+    const all=[...d.defs,...d.skills].map((x,i)=>{const b=mkBtn(Object.assign({},x,{cls:(x.cls||'')+(grid?' cell':i?' sec':' prim')+(x.cost?' hascost':'')}));box.appendChild(b);cmdBtns.push(b);return b;});
+    if(!grid)layoutArc(all[0],all.slice(1));
   }
   updCmds();
 }
