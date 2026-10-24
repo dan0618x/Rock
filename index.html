@@ -288,6 +288,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         <li><b>正式開局</b>：1 座主堡、3 個工兵、人口上限 10。每座主堡最多 8 個工兵採廢料</li>
         <li><b>主堡</b>：工兵、升級、擴建共用一條佇列。升級 Lv2 解鎖空軍基地、Lv3 解鎖研究所、Lv4 特殊單位（尚未設計）</li>
         <li><b>擴建</b>：人口上限依序 +5、+10、+10、+15，最多 50，費用逐次增加</li>
+        <li><b>主堡等級與人口全隊共用</b>：蓋第二座主堡不會多出人口，任何一座升級或擴建都算全隊的</li>
         <li><b>生產基地強化</b>：Lv1 攻擊、Lv2 防禦、Lv3 攻防都再提升（地面、空軍分開算）</li>
         <li><b>研究所</b>：每個兵種的技能二選一，研究完才會出現技能按鈕</li>
         <li><b>拾荒者兵種解鎖</b>：火箭兵需主堡 Lv2；重甲兵需空軍基地；機槍車手、重武裝手、立翔榴彈兵需研究所；俯翼轟炸兵需主堡 Lv4</li>
@@ -459,7 +460,7 @@ function reset(){
   FAC=SET.faction;PROD.base=FAC==='mech'?['worker','drone']:['worker'];PROD.barracks=ROSTER[FAC].barracks;PROD.airbase=ROSTER[FAC].airbase;
   ents=[];byId=new Map();nextId=1;sel=new Set();slots=[[],[],[],[],[]];
   const sandbox=SET.start==='sandbox';
-  res=sandbox?{s:800,g:400}:{s:250,g:50};up={ground:0,air:0,gather:0,skill:{},pend:{}};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
+  res=sandbox?{s:800,g:400}:{s:250,g:50};up={ground:0,air:0,gather:0,skill:{},pend:{},baseLv:1,exp:0};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
   waveT=WAVE_FIRST;waveN=0;waveDone=false;time=0;skillPage=0;
   patches=[];let sd=7;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
   for(let i=0;i<140;i++)patches.push({x:rnd()*W,y:rnd()*H,r:60+rnd()*180,d:rnd()<.55});
@@ -471,7 +472,7 @@ function reset(){
   const field=(cx,cy,n)=>{for(let i=0;i<n;i++){const a=-Math.PI/2+i*Math.PI/2.6;spawn('scrap',-1,cx+Math.cos(a)*95,cy+Math.sin(a)*95);}};
   field(1180,1640,4);field(2230,620,4);field(1700,1130,3);field(560,480,3);field(2860,1840,3);
   if(sandbox){
-    myBase.lvl=3;myBase.exp=4;spawn('barracks',0,690,1750);spawn('airbase',0,680,1980);spawn('turret',0,610,1590);spawn('lab',0,450,1590);
+    up.baseLv=3;up.exp=4;spawn('barracks',0,690,1750);spawn('airbase',0,680,1980);spawn('turret',0,610,1590);spawn('lab',0,450,1590);
     [...PROD.barracks,...PROD.airbase].forEach(t=>up.skill[t]=0);
     if(FAC==='scav'){spawn('pump',0,340,2080);spawn('pump',0,560,2110);}
     if(FAC==='vine'){const l=spawn('lung',0,450,2080);l.age=40;}
@@ -544,10 +545,11 @@ const selEnts=()=>[...sel].map(id=>byId.get(id)).filter(Boolean);
 const own=f=>ents.filter(e=>e.team===0&&f(e));
 function nearestRes(e){let b=null,bd=1e9;for(const r of ents)if(r.cat==='res'&&r.amt>0){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
 function nearestDrop(e){let b=null,bd=1e9;for(const r of ents)if(r.team===e.team&&working(r)&&(r.type==='base'||r.type==='depot')){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
-function popCap(){let c=0;for(const b of ents)if(b.team===0&&b.type==='base'&&b.built){c+=10;for(let i=0;i<(b.exp||0);i++)c+=EXPAND.add[i];}return Math.min(200,c);}
+// 人口與主堡等級全隊共用：主堡蓋再多座，上限也不會疊加
+function popCap(){if(!hasBuilt('base'))return 0;let c=10;for(let i=0;i<up.exp;i++)c+=EXPAND.add[i];return c;}
 const hasBuilt=t=>ents.some(e=>e.team===0&&e.type===t&&e.built);
 function unitReq(t){const r=UNIT_REQ[t];if(!r)return'';if(r.lv&&techLv()<r.lv)return'需 Lv'+r.lv;if(r.b&&!hasBuilt(r.b))return'需'+TY[r.b].name;return'';}
-const techLv=()=>Math.max(0,...ents.filter(b=>b.team===0&&b.type==='base'&&b.built).map(b=>b.lvl));
+const techLv=()=>hasBuilt('base')?up.baseLv:0;
 function popUsed(){let u=0;for(const e of ents)if(e.team===0){if(isU(e))u+=TY[e.type].pop||0;for(const q of e.q)if(q.kind==='unit')u+=TY[q.type].pop||0;}return u;}
 const afford=c=>res.s>=c[0]&&res.g>=c[1];
 function pay(c){if(!afford(c)){toast(res.s<c[0]?'廢料不足':'輻能氣不足','bad');return false;}res.s-=c[0];res.g-=c[1];return true;}
@@ -731,8 +733,8 @@ function queueBuilding(es,type){
 const catOf=t=>t==='barracks'?'ground':'air';
 // 下一級的花費與時間；max=已到上限
 function nextUp(b,kind){
-  if(kind==='upg'){const lv=b.lvl;return lv>=4?{max:true}:{cost:BASE_UP.cost[lv-1],t:BASE_UP.t[lv-1],lv};}
-  if(kind==='exp'){const n=b.exp||0;return n>=4?{max:true}:{cost:EXPAND.cost[n],t:EXPAND.t[n],lv:n};}
+  if(kind==='upg'){const lv=up.baseLv;return lv>=4?{max:true}:{cost:BASE_UP.cost[lv-1],t:BASE_UP.t[lv-1],lv};}
+  if(kind==='exp'){const n=up.exp;return n>=4?{max:true}:{cost:EXPAND.cost[n],t:EXPAND.t[n],lv:n};}
   if(kind==='pupg'){const lv=up[catOf(b.type)];return lv>=3?{max:true}:{cost:PROD_UP.cost[lv],t:PROD_UP.t[lv],lv};}
   if(kind==='tupg'){return b.lvl>=3?{max:true}:{cost:TUR_UP.cost,t:TUR_UP.t,lv:b.lvl};}
 }
@@ -740,7 +742,10 @@ function queueUp(es,kind){
   const bs=es.filter(working);
   if(!bs.length){toast('建築無法運作','bad');return;}
   let b;
-  if(kind==='pupg'){
+  if(kind==='upg'||kind==='exp'){
+    if(ents.some(x=>x.team===0&&x.type==='base'&&x.q.some(q=>q.kind===kind))){toast((kind==='upg'?'主堡升級':'擴建')+'進行中（所有主堡共用）','bad');return;}
+    b=bs.sort((a,c)=>a.q.length-c.q.length)[0];
+  }else if(kind==='pupg'){
     const cat=catOf(bs[0].type);
     if(ents.some(x=>x.team===0&&x.q.some(q=>q.kind==='pupg'&&q.cat===cat))){toast('強化進行中','bad');return;}
     b=bs.sort((a,c)=>a.q.length-c.q.length)[0];
@@ -753,7 +758,7 @@ function queueUp(es,kind){
   if(b.q.length>=5){toast('佇列已滿（5）','bad');return;}
   if(!pay(n.cost))return;
   b.q.push({kind,t:0,total:n.t,cat:kind==='pupg'?catOf(b.type):undefined});
-  toast(kind==='upg'?'開始升級 Lv'+(b.lvl+1)+'：解鎖'+BASE_UP.unlock[b.lvl-1]:kind==='exp'?'開始擴建：人口上限 +'+EXPAND.add[b.exp||0]:kind==='pupg'?'開始強化 Lv'+(n.lv+1)+'：'+PROD_UP.eff[n.lv]:'開始升級砲塔');
+  toast(kind==='upg'?'開始升級 Lv'+(up.baseLv+1)+'：解鎖'+BASE_UP.unlock[up.baseLv-1]:kind==='exp'?'開始擴建：人口上限 +'+EXPAND.add[up.exp]:kind==='pupg'?'開始強化 Lv'+(n.lv+1)+'：'+PROD_UP.eff[n.lv]:'開始升級砲塔');
 }
 // 佇列項目在圖示上用的字
 const qch=q=>q.kind==='unit'?TY[q.type].ch:q.kind==='upg'?'升':q.kind==='exp'?'擴':q.kind==='pupg'?'強':q.kind==='tupg'?'升':q.kind==='skill'?SK[TY[q.type].sk[q.opt]].name[0]:TY[q.type].ch;
@@ -1037,8 +1042,8 @@ function updBuilding(b,dt){
   b.q.shift();
   if(q.kind!=='unit'){
     let msg='';
-    if(q.kind==='upg'){b.lvl++;msg=FACS[FAC].base+' 升到 Lv'+b.lvl+'：解鎖'+BASE_UP.unlock[b.lvl-2];}
-    else if(q.kind==='exp'){const a=EXPAND.add[b.exp||0];b.exp=(b.exp||0)+1;msg='擴建完成：人口上限 +'+a;}
+    if(q.kind==='upg'){up.baseLv++;msg=FACS[FAC].base+' 升到 Lv'+up.baseLv+'：解鎖'+BASE_UP.unlock[up.baseLv-2];}
+    else if(q.kind==='exp'){const a=EXPAND.add[up.exp];up.exp++;msg='擴建完成：人口上限 +'+a;}
     else if(q.kind==='pupg'){up[q.cat]++;msg=(q.cat==='ground'?'地面':'空軍')+'強化 Lv'+up[q.cat]+'：'+PROD_UP.eff[up[q.cat]-1];}
     else if(q.kind==='tupg'){b.lvl++;msg='砲塔升到 Lv'+b.lvl;}
     else if(q.kind==='skill'){up.skill[q.type]=q.opt;delete up.pend[q.type];msg=TY[q.type].name+' 學會「'+SK[TY[q.type].sk[q.opt]].name+'」';}
@@ -1188,7 +1193,7 @@ function draw(){
     bPath(shape,b.x,b.y,b.r);ctx.fillStyle=off?'#2a2a2a':shape==='blob'?'#2e211f':'#22261e';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=3;ctx.stroke();
     label(chOf(b),b.x,b.y,b.r*.85,col);ctx.globalAlpha=1;
     if(off)label('斷線',b.x,b.y-b.r-14,12,C.bad);
-    if(b.type==='base'&&ownB){label('Lv'+b.lvl,b.x,b.y+b.r*.62,12,C.dim);if(b.built){const n=minersOf(b);label('工 '+n+'/'+MINE_CAP,b.x,b.y-b.r*.6,12,n>=MINE_CAP?C.accent:C.dim);}}
+    if(b.type==='base'&&ownB){label('Lv'+up.baseLv,b.x,b.y+b.r*.62,12,C.dim);if(b.built){const n=minersOf(b);label('工 '+n+'/'+MINE_CAP,b.x,b.y-b.r*.6,12,n>=MINE_CAP?C.accent:C.dim);}}
     const paused=!b.built&&ownB&&FAC==='scav'&&!builderOf(b);
     if(paused)label('暫停',b.x,b.y-b.r-14,12,C.dim);
     if(!b.built){ctx.strokeStyle=paused?C.dim:FAC==='vine'&&ownB?C.flesh:C.accent;ctx.lineWidth=4;ctx.beginPath();ctx.arc(b.x,b.y,b.r+8,-Math.PI/2,-Math.PI/2+Math.PI*2*b.prog);ctx.stroke();}
@@ -1676,7 +1681,7 @@ function updCmds(){
     if(d.place&&mode&&mode.k==='place')b.classList.toggle('off',!placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null).ok||(FAC!=='mech'&&!afford(TY[mode.type].cost)));
     let badge='';
     if(d.unit&&k.k==='bld'){const n=k.es.reduce((s,x)=>s+x.q.filter(q=>q.type===d.unit).length,0);const lp=k.es.some(x=>x.loop===d.unit);badge=(lp?'∞':'')+(n?n:'');}
-    if(d.up&&k.k==='bld'){const b0=k.es[0];badge=d.up==='upg'?'Lv'+b0.lvl:d.up==='exp'?(b0.exp||0)+'/4':d.up==='pupg'?'Lv'+up[catOf(k.type)]:'Lv'+b0.lvl;}
+    if(d.up&&k.k==='bld'){const b0=k.es[0];badge=d.up==='upg'?'Lv'+up.baseLv:d.up==='exp'?up.exp+'/4':d.up==='pupg'?'Lv'+up[catOf(k.type)]:'Lv'+b0.lvl;}
     b.querySelector('.badge').textContent=badge;
     if(d.label)b.querySelector('.lb').textContent=d.label();
     // 指針式倒數：從 12 點鐘方向順時針掃過，未完成的部分蓋暗
@@ -1723,8 +1728,8 @@ onTapEl('btnIdle',()=>{const l=own(e=>e.type==='worker'&&e.order.k==='idle');if(
 onTapEl('evBtn',eventJump);
 function refundOf(q,b,fromBq){
   if(fromBq||q.kind==='unit')return TY[q.type].cost;
-  if(q.kind==='upg')return BASE_UP.cost[b.lvl-1];
-  if(q.kind==='exp')return EXPAND.cost[b.exp||0];
+  if(q.kind==='upg')return BASE_UP.cost[up.baseLv-1];
+  if(q.kind==='exp')return EXPAND.cost[up.exp];
   if(q.kind==='pupg')return PROD_UP.cost[up[q.cat]];
   if(q.kind==='tupg')return TUR_UP.cost;
   if(q.kind==='skill')return SKILL_COST;
@@ -1799,7 +1804,7 @@ function frame(){
 }
 window.addEventListener('resize',()=>{resize();placePop();refreshCmds(true);});
 buildCats();buildSlots();renderFacPick();resize();reset();
-window.__rts={get ents(){return ents},get mode(){return mode},get res(){return res},get sel(){return [...sel]},get cam(){return cam},get up(){return up},w2s,canHit,popCap,techLv,skipWave(){waveT=0;},fast(){for(const b of ents)if(b.q)b.q.forEach(q=>q.total=Math.min(q.total,.3));}};
+window.__rts={get ents(){return ents},get mode(){return mode},get res(){return res},get sel(){return [...sel]},get cam(){return cam},get up(){return up},w2s,canHit,popCap,spawn,techLv,skipWave(){waveT=0;},fast(){for(const b of ents)if(b.q)b.q.forEach(q=>q.total=Math.min(q.total,.3));}};
 requestAnimationFrame(frame);
 })();
 </script>
