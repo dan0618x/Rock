@@ -291,7 +291,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         <li><b>生產基地強化</b>：Lv1 攻擊、Lv2 防禦、Lv3 攻防都再提升（地面、空軍分開算）</li>
         <li><b>研究所</b>：每個兵種的技能二選一，研究完才會出現技能按鈕</li>
         <li><b>拾荒者兵種解鎖</b>：火箭兵需主堡 Lv2；重甲兵需空軍基地；機槍車手、重武裝手、立翔榴彈兵需研究所；俯翼轟炸兵需主堡 Lv4</li>
-        <li><b>拾荒者攻勢</b>：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波；右上顯示倒數</li>
+        <li><b>拾荒者攻勢</b>：第 2 分鐘第一波，之後每 1.5 分鐘一波，共 10 波；數量從 3 個加速增加到 50 個，後面的波次血量和攻擊也逐波提高；右上顯示倒數</li>
         <li>右上 ⚙ 可以換成<b>測試開局</b>：已有建築、部隊，技能都選了第一個</li>
       </ul>
       <h2>三族建造方式</h2>
@@ -395,10 +395,20 @@ const TUR_UP={cost:[75,0],t:8},SKILL_COST=[100,100],SKILL_T=20;
 const BUILD_REQ={airbase:2,lab:3};
 // 兵種解鎖條件：lv=主堡等級，b=需要已蓋好的建築
 const UNIT_REQ={srocket:{lv:2},heavy:{b:'airbase'},biker:{b:'lab'},walker:{b:'lab'},glider:{b:'lab'},divebomber:{lv:4}};
-// 拾荒者攻勢：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波
-const WAVES=[{rifle:4},{rifle:5,srocket:2},{rifle:4,srocket:2,biker:2},{rifle:4,heavy:2,biker:2,jetpack:1},{rifle:5,srocket:3,heavy:2,turbo:2},
-  {rifle:4,heavy:2,biker:3,walker:2,glider:2},{rifle:6,srocket:3,heavy:3,turbo:2,divebomber:2},{rifle:6,heavy:4,biker:3,walker:2,glider:3,divebomber:2},
-  {rifle:8,srocket:4,heavy:4,walker:3,turbo:3,divebomber:3},{rifle:10,srocket:5,heavy:5,walker:4,turbo:4,glider:4,divebomber:4}];
+// 拾荒者攻勢：第 2 分鐘第一波，之後每 1.5 分鐘一波，共 10 波
+// 數量 3→50 逐波加速成長，後面的波次血量與攻擊也逐波 +6%
+const WAVE_FIRST=120,WAVE_GAP=90,WAVE_SCALE=.06;
+const WAVES=[
+  {rifle:3},
+  {rifle:4,srocket:1},
+  {rifle:5,srocket:2,biker:1},
+  {rifle:5,srocket:2,heavy:2,jetpack:1,turbo:1},
+  {rifle:6,srocket:3,heavy:2,biker:2,turbo:2},
+  {rifle:7,srocket:3,heavy:3,biker:2,walker:2,turbo:2,glider:1},
+  {rifle:8,srocket:4,heavy:4,biker:3,walker:2,turbo:2,glider:2,divebomber:1},
+  {rifle:10,srocket:5,heavy:5,biker:3,walker:3,turbo:3,glider:2,divebomber:2},
+  {rifle:12,srocket:6,heavy:6,biker:4,walker:4,turbo:3,glider:3,divebomber:3},
+  {rifle:14,srocket:7,heavy:7,biker:5,walker:5,turbo:4,glider:4,divebomber:4}];
 const BUILDS={scav:['barracks','airbase','lab','turret','pump','base'],vine:['barracks','airbase','lab','turret','lung','base'],mech:['barracks','airbase','lab','turret','base']};
 const CATS=[['building','建','建築'],['worker','工','工兵'],['ground','地','地面'],['air','空','空軍']];
 
@@ -408,7 +418,7 @@ const SETDEF=[
   ['snap','有選取時拖曳鏡頭，放開後',[['back','部隊離開畫面才回到部隊','你的原設計'],['stay','一律停在原處','']]],
   ['autoGather','新生產的工兵',[['off','待命','你的原設計'],['on','自動去採廢料','建議']]],
   ['start','開局（切換會重置戰場）',[['formal','正式開局：1 堡 3 工兵',''],['sandbox','測試開局：已有建築和部隊','']]],
-  ['waves','拾荒者攻勢（10 波：第 3 分鐘起每 2 分鐘一波）',[['on','開',''],['off','關','']]],
+  ['waves','拾荒者攻勢（10 波：第 2 分鐘起每 1.5 分鐘一波）',[['on','開',''],['off','關','']]],
 ];
 const SET={};
 SETDEF.forEach(([k,,o])=>SET[k]=o[0][0]);
@@ -419,7 +429,7 @@ let FAC=SET.faction;
 // ---------- 狀態 ----------
 let ents=[],byId=new Map(),nextId=1,sel=new Set(),slots=[[],[],[],[],[]];
 let res={s:0,g:0},gasRate=0,up={ground:0,air:0,gather:0},mode=null;
-let markers=[],shots=[],booms=[],patches=[],pend=[],events=[],waveT=180,waveN=0,waveDone=false,time=0,connT=0,skillPage=0;
+let markers=[],shots=[],booms=[],patches=[],pend=[],events=[],waveT=WAVE_FIRST,waveN=0,waveDone=false,time=0,connT=0,skillPage=0;
 let cam={x:520,y:1180,z:1};
 let VW=0,VH=0,DPR=1;
 
@@ -450,7 +460,7 @@ function reset(){
   ents=[];byId=new Map();nextId=1;sel=new Set();slots=[[],[],[],[],[]];
   const sandbox=SET.start==='sandbox';
   res=sandbox?{s:800,g:400}:{s:250,g:50};up={ground:0,air:0,gather:0,skill:{},pend:{}};mode=null;markers=[];shots=[];booms=[];pend=[];events=[];
-  waveT=180;waveN=0;waveDone=false;time=0;skillPage=0;
+  waveT=WAVE_FIRST;waveN=0;waveDone=false;time=0;skillPage=0;
   patches=[];let sd=7;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
   for(let i=0;i<140;i++)patches.push({x:rnd()*W,y:rnd()*H,r:60+rnd()*180,d:rnd()<.55});
   // 廢料區：主基地 4 堆，其他擴張點各 3～4 堆
@@ -821,7 +831,7 @@ function dmg(t,d,src){
 }
 function fire(e,t){
   const T=TY[e.type];
-  const d=T.dmg*dmgMult(e)*(e.sieged?1.5:1)*(e.type==='turret'?1+.3*(e.lvl-1):1)*(e.dmgT>0?e.dmgMult:1);
+  const d=T.dmg*dmgMult(e)*(e.sieged?1.5:1)*(e.type==='turret'?1+.3*(e.lvl-1):1)*(e.dmgT>0?e.dmgMult:1)*(e.wmult||1);
   e.cd=T.cd*(e.hasteT>0?.6:1);
   shots.push({x1:e.x,y1:e.y-(e.cat==='air'?6:0),x2:t.x,y2:t.y,t:0,c:e.team===0?C.ally:C.enemy,w:['tank','rocket','srocket','walker','glider'].includes(e.type)?3:1.5});
   if(e.salvo>0){e.salvo=0;booms.push({x:t.x,y:t.y,r:70,t:0,c:C.accent});for(const o of ents)if(o.team===t.team&&hyp(o,t)<70+o.r)dmg(o,25,e);}
@@ -1099,14 +1109,14 @@ function step(dt){
   markers.forEach(m=>m.t+=dt);markers=markers.filter(m=>m.t<.6);
   shots.forEach(s=>s.t+=dt);shots=shots.filter(s=>s.t<.12);
   booms.forEach(b=>b.t+=dt);booms=booms.filter(b=>b.t<.45);
-  if(SET.waves==='on'&&waveN<WAVES.length){waveT-=dt;if(waveT<=0){spawnWave(waveN);waveN++;waveT=120;}}
+  if(SET.waves==='on'&&waveN<WAVES.length){waveT-=dt;if(waveT<=0){spawnWave(waveN);waveN++;waveT=WAVE_GAP;}}
   if(waveN>=WAVES.length&&!waveDone&&!ents.some(e=>e.wave&&e.hp>0)){waveDone=true;toast('10 波拾荒者攻勢全部擊退！');}
 }
 
 function spawnWave(i){
   let k=0;
   Object.entries(WAVES[i]).forEach(([t,n])=>{for(let j=0;j<n;j++){
-    const u=spawn(t,1,2760+(k%6)*32,600+Math.floor(k/6)*32,{wave:i+1});
+    const m=1+WAVE_SCALE*i,u=spawn(t,1,2700+(k%7)*32,560+Math.floor(k/7)*32,{wave:i+1,wmult:m});u.hp=u.maxHp=Math.round(TY[t].hp*m);
     u.order={k:'move',x:470+(Math.random()-.5)*120,y:1800+(Math.random()-.5)*120,amove:true};k++;}});
   pushEvent(2840,660,'第 '+(i+1)+' 波拾荒者攻勢','wave');
   toast('第 '+(i+1)+'/'+WAVES.length+' 波拾荒者攻勢來襲（'+k+' 個單位）','bad');
