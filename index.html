@@ -100,7 +100,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #bottom > *{pointer-events:auto}
 #cats{justify-self:start;display:grid;grid-template-columns:repeat(2,var(--b));gap:6px}
 #mid{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
-#selInfo{font-size:12px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#selRow{display:flex;gap:6px;align-items:center;max-width:100%;min-width:0}
+.mini.qx{width:auto;height:26px;padding:0 10px;font-size:12px;font-weight:600;border-color:var(--bad);color:#ffc9c1;flex:none}
+#selInfo{min-width:0;font-size:12px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #selInfo b{color:var(--fg)}
 #slots{display:flex;gap:5px}
 /* 右下圓形配置：大圓鈕在角落，其他按鈕沿四分之一圓弧排開 */
@@ -114,7 +116,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cmdArea .btn.sec .lb{font-size:9px}
 #cmdArea .btn .cost{position:static;font-size:9px}
 #cmdArea .btn.hascost .lb{display:none}
-#cmdArea .btn .badge{left:50%;top:3px;transform:translateX(-50%)}
+#cmdArea .btn .badge{left:50%;top:4px;transform:translateX(-50%);font-size:9px}
+#cmdArea .btn.sec{padding-top:10px}
+#cmdArea .btn.prim{padding-top:6px}
 
 .btn{width:var(--b);height:var(--b);border-radius:12px;border:1px solid var(--line);background:linear-gradient(var(--btn-top),var(--btn-bot));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;position:relative;cursor:pointer;padding:0;overflow:hidden;transition:transform .08s,border-color .15s}
 .btn .ch{font-size:calc(var(--b) * .36);font-weight:700;line-height:1}
@@ -246,7 +250,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   <div class="hud" id="bottom">
     <div id="cats"></div>
-    <div id="mid"><div id="selInfo"></div><div id="slots"></div></div>
+    <div id="mid"><div id="selRow"><div id="selInfo"></div><button class="mini qx" id="qCancel" hidden>✕ 取消</button></div><div id="slots"></div></div>
     <div id="cmdArea"></div>
   </div>
 
@@ -933,6 +937,12 @@ function updUnit(e,dt){
   }
   switch(o.k){
     case 'hold':break;
+    case 'return':{
+      const b=byId.get(o.bid);
+      if(!b||!working(b)){e.order=o.prev||{k:'idle'};break;}
+      if(hyp(e,b)>b.r+e.r+2){if(hyp(e,b)>260)goTo(e,b.x,b.y,spd,dt,b);else moveTo(e,b.x,b.y,spd,dt);}
+      else{if(e.carry){res.s+=e.carry;e.carry=0;}e.order=o.prev?Object.assign(o.prev,{st:'to'}):{k:'idle'};}
+      break;}
     case 'idle':{
       if(isCombat(e)&&T.dmg){const t=acquire(e,rng+(e.team?120:40));if(t){if(e.sieged){if(hyp(e,t)-t.r<=rng)e.order={k:'attack',tid:t.id,auto:true};}else e.order={k:'attack',tid:t.id,auto:true,home:{x:e.x,y:e.y}};}}
       break;}
@@ -1328,6 +1338,11 @@ function handleTap(sx,sy){
     if(k.k==='bld'){setRally(k.es,{x:hit.x,y:hit.y,res:hit.id});return;}
   }
   if(hit&&hit.team===0&&isB(hit)&&!hit.built&&FAC==='scav'&&k.k==='worker'){resumeBuild(k.es,hit);return;}
+  if(hit&&hit.team===0&&hit.type==='base'&&hit.built&&k.k==='worker'){
+    const carriers=k.es.filter(w=>w.type==='worker'&&w.carry>0);
+    if(carriers.length){carriers.forEach(w=>{const prev=w.order.k==='gather'?w.order:null;w.order={k:'return',bid:hit.id,prev};});
+      markers.push({x:hit.x,y:hit.y,t:0,c:C.scrap,r:hit.r});gesture('<b>帶著廢料點主堡</b> → '+carriers.length+' 個工兵把廢料存入');return;}
+  }
   if(hit&&hit.team===0){tapSelect(hit);return;}
   if(k.k==='bld'){setRally(k.es,w);return;}
   moveCmd(k.es,w,false);
@@ -1585,7 +1600,7 @@ function cmdDefs(){
     if(t==='barracks'||t==='airbase')upBtn('pupg','強','強化');
     if(t==='turret')upBtn('tupg','升','升級');
     if(t==='lab')defs.push({ch:'研',lb:'研究',cdf:()=>qRem(q=>q.kind==='skill'),onTap:el=>{if(popAnchor===el){closePop();return;}openPop(el,renderResearch);}});
-    if(t==='base')defs.push({ch:'召',lb:'閒置回採',onTap:()=>{const idle=own(e=>e.type==='worker'&&e.order.k==='idle');idle.forEach(w=>gather([w],nearestRes(w)));toast(idle.length?idle.length+' 個閒置工兵回去採集':'沒有閒置工兵');}});
+    if(t==='base')defs.push({ch:'召',lb:'回採',onTap:()=>{const idle=own(e=>e.type==='worker'&&e.order.k==='idle');idle.forEach(w=>gather([w],nearestRes(w)));toast(idle.length?idle.length+' 個閒置工兵回去採集':'沒有閒置工兵');}});
     if(t==='turret'||t==='depot'||t==='pump'||t==='lung'){defs.push({ch:'修',lb:'維修',cost:[25,0],onTap:()=>repair(selKind().es)});defs.push({ch:'拆',lb:'拆除',onTap:()=>demolish(selKind().es)});}
   }
   // 技能 5 個以內全部顯示；6 個以上：每頁 4 技 + 換（圓弧最下面那格）
@@ -1686,6 +1701,7 @@ function refreshHUD(){
   $('#evBtn').innerHTML='<span class="ch">!</span><span class="lb">事件</span>'+(un?'<span class="bdg">'+un+'</span>':'');
   $('#evBtn').classList.toggle('hot',un>0);
   renderSelInfo();renderSlots();updCmds();
+  {const k=selKind();$('#qCancel').hidden=!(k.k==='bld'&&k.es.some(x=>x.q.length||(x.bq&&x.bq.length)));}
 }
 function refreshAll(force){refreshCmds(force);refreshHUD();}
 
@@ -1694,6 +1710,29 @@ onTapEl('btnClear',()=>{setSel([],true);gesture('<b>✕</b> → 取消選取');}
 onTapEl('btnArmy',()=>{const l=own(isCombat);if(!l.length){toast('沒有部隊');return;}selectAndJump(l,'army','<b>全部部隊</b> → '+l.length+' 個（地面＋空軍，不含工兵）');});
 onTapEl('btnIdle',()=>{const l=own(e=>e.type==='worker'&&e.order.k==='idle');if(!l.length){toast('沒有閒置工兵');return;}selectAndJump(l,'idle','<b>閒置工兵</b> → '+l.length+' 個');});
 onTapEl('evBtn',eventJump);
+function refundOf(q,b,fromBq){
+  if(fromBq||q.kind==='unit')return TY[q.type].cost;
+  if(q.kind==='upg')return BASE_UP.cost[b.lvl-1];
+  if(q.kind==='exp')return EXPAND.cost[b.exp||0];
+  if(q.kind==='pupg')return PROD_UP.cost[up[q.cat]];
+  if(q.kind==='tupg')return TUR_UP.cost;
+  if(q.kind==='skill')return SKILL_COST;
+  return[0,0];
+}
+const qName=(q,fromBq)=>fromBq?'生成 '+TY[q.type].name:q.kind==='unit'?TY[q.type].name:q.kind==='upg'?'主堡升級':q.kind==='exp'?'擴建':q.kind==='pupg'?'強化':q.kind==='tupg'?'砲塔升級':q.kind==='skill'?'研究「'+SK[TY[q.type].sk[q.opt]].name+'」':'';
+function cancelCurrent(){
+  const k=selKind();if(k.k!=='bld')return;
+  const b=k.es.filter(x=>x.q.length).sort((a,c)=>c.q[0].t/c.q[0].total-a.q[0].t/a.q[0].total)[0]||k.es.find(x=>x.bq&&x.bq.length);
+  if(!b){toast('沒有正在進行的製程');return;}
+  const fromBq=!b.q.length,q=fromBq?b.bq.shift():b.q.shift(),c=refundOf(q,b,fromBq);
+  res.s+=c[0];res.g+=c[1];
+  if(q.kind==='skill')delete up.pend[q.type];
+  if(q.kind==='unit'&&b.loop===q.type)b.loop=null;
+  toast('已取消 '+qName(q,fromBq)+'，退回 '+c[0]+(c[1]?'／'+c[1]:''));
+  gesture('<b>取消</b> → 取消目前製程'+(q.kind==='unit'&&!b.loop?'':''));
+  refreshAll(true);
+}
+onTapEl('qCancel',cancelCurrent);
 
 // 種族選擇與設定
 function renderFacPick(){
