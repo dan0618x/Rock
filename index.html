@@ -497,7 +497,7 @@ function reset(){
 // ---------- 鏡頭 ----------
 const minZ=()=>Math.min(VW/W,VH/H);
 // 預設鏡頭拉遠一點（一個畫面約 720 高的地圖），最大放大倍數也降低
-const maxZ=()=>1.2;
+const maxZ=()=>defZ();
 const defZ=()=>Math.max(minZ(),Math.min(1,VH/720));
 // 鏡頭可以超出地圖邊緣，超出量＝該側介面按鈕佔的寬度，地圖最外圍的東西才能拉到按鈕外面
 const PAD={l:0,r:0,t:0,b:0};
@@ -1396,8 +1396,8 @@ mm.addEventListener('pointermove',ev=>{if(!MM)return;if(!MM.drag&&Math.hypot(ev.
   if(MM.drag){const w=mmWorld(ev);cam.x=w.x;cam.y=w.y;clampCam();camAnim=null;}});
 function mmUp(ev){if(!MM)return;const was=MM;MM=null;if(was.drag||ev.type==='pointercancel')return;
   const w=mmWorld(ev);
-  if(cam.z>minZ()+.001){prevZ=cam.z;cam.z=minZ();clampCam();gesture('<b>點小地圖</b> → 縮到最大，看整張地圖');}
-  else{cam.z=prevZ||defZ();cam.x=w.x;cam.y=w.y;clampCam();gesture('<b>再點小地圖</b> → 放大回到這裡');}
+  // 點小地圖：用預設倍率把鏡頭移到那裡
+  cam.z=defZ();cam.x=w.x;cam.y=w.y;clampCam();camAnim=null;gesture('<b>點小地圖</b> → 鏡頭移到這裡');
 }
 mm.addEventListener('pointerup',mmUp);mm.addEventListener('pointercancel',mmUp);
 
