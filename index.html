@@ -496,8 +496,9 @@ function reset(){
 
 // ---------- 鏡頭 ----------
 const minZ=()=>Math.min(VW/W,VH/H);
-const maxZ=()=>1.8;
-const defZ=()=>Math.max(minZ(),Math.min(1.3,VH/560));
+// 預設鏡頭拉遠一點（一個畫面約 720 高的地圖），最大放大倍數也降低
+const maxZ=()=>1.2;
+const defZ=()=>Math.max(minZ(),Math.min(1,VH/720));
 // 鏡頭可以超出地圖邊緣，超出量＝該側介面按鈕佔的寬度，地圖最外圍的東西才能拉到按鈕外面
 const PAD={l:0,r:0,t:0,b:0};
 function measurePad(){
