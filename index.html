@@ -286,6 +286,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         <li><b>擴建</b>：人口上限依序 +5、+10、+10、+15，最多 50，費用逐次增加</li>
         <li><b>生產基地強化</b>：Lv1 攻擊、Lv2 防禦、Lv3 攻防都再提升（地面、空軍分開算）</li>
         <li><b>研究所</b>：每個兵種的技能二選一，研究完才會出現技能按鈕</li>
+        <li><b>拾荒者兵種解鎖</b>：火箭兵需主堡 Lv2；重甲兵需空軍基地；機槍車手、重武裝手、立翔榴彈兵需研究所；俯翼轟炸兵需主堡 Lv4</li>
         <li><b>拾荒者攻勢</b>：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波；右上顯示倒數</li>
         <li>右上 ⚙ 可以換成<b>測試開局</b>：已有建築、部隊，技能都選了第一個</li>
       </ul>
@@ -388,6 +389,8 @@ const EXPAND={add:[5,10,10,15],cost:[[50,0],[100,0],[150,50],[200,100]],t:[10,12
 const PROD_UP={cost:[[100,50],[150,100],[200,150]],t:[20,25,30],eff:['攻擊 +15%','防禦 +10%','攻擊、防禦再提升']};
 const TUR_UP={cost:[75,0],t:8},SKILL_COST=[100,100],SKILL_T=20;
 const BUILD_REQ={airbase:2,lab:3};
+// 兵種解鎖條件：lv=主堡等級，b=需要已蓋好的建築
+const UNIT_REQ={srocket:{lv:2},heavy:{b:'airbase'},biker:{b:'lab'},walker:{b:'lab'},glider:{b:'lab'},divebomber:{lv:4}};
 // 拾荒者攻勢：第 3 分鐘第一波，之後每 2 分鐘一波，共 10 波
 const WAVES=[{rifle:4},{rifle:5,srocket:2},{rifle:4,srocket:2,biker:2},{rifle:4,heavy:2,biker:2,jetpack:1},{rifle:5,srocket:3,heavy:2,turbo:2},
   {rifle:4,heavy:2,biker:3,walker:2,glider:2},{rifle:6,srocket:3,heavy:3,turbo:2,divebomber:2},{rifle:6,heavy:4,biker:3,walker:2,glider:3,divebomber:2},
@@ -527,6 +530,8 @@ const own=f=>ents.filter(e=>e.team===0&&f(e));
 function nearestRes(e){let b=null,bd=1e9;for(const r of ents)if(r.cat==='res'&&r.amt>0){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
 function nearestDrop(e){let b=null,bd=1e9;for(const r of ents)if(r.team===e.team&&working(r)&&(r.type==='base'||r.type==='depot')){const d=hyp(e,r);if(d<bd){bd=d;b=r;}}return b;}
 function popCap(){let c=0;for(const b of ents)if(b.team===0&&b.type==='base'&&b.built){c+=10;for(let i=0;i<(b.exp||0);i++)c+=EXPAND.add[i];}return Math.min(200,c);}
+const hasBuilt=t=>ents.some(e=>e.team===0&&e.type===t&&e.built);
+function unitReq(t){const r=UNIT_REQ[t];if(!r)return'';if(r.lv&&techLv()<r.lv)return'需 Lv'+r.lv;if(r.b&&!hasBuilt(r.b))return'需'+TY[r.b].name;return'';}
 const techLv=()=>Math.max(0,...ents.filter(b=>b.team===0&&b.type==='base'&&b.built).map(b=>b.lvl));
 function popUsed(){let u=0;for(const e of ents)if(e.team===0){if(isU(e))u+=TY[e.type].pop||0;for(const q of e.q)if(q.kind==='unit')u+=TY[q.type].pop||0;}return u;}
 const afford=c=>res.s>=c[0]&&res.g>=c[1];
@@ -694,6 +699,7 @@ function produce(es,type){
   bs.sort((a,b)=>a.q.length-b.q.length);const b=bs[0];
   if(b.q.length>=5){toast('佇列已滿（5）','bad');return false;}
   const T=TY[type];
+  const lk=unitReq(type);if(lk){toast(T.name+'：'+(lk.includes('Lv')?lk.replace('需 ','需要'+FACS[FAC].base+' '):lk.replace('需','需要')),'bad');return false;}
   if(popUsed()+T.pop>popCap()){toast('人口不足，請在'+FACS[FAC].base+'擴建','bad');return false;}
   if(!pay(T.cost))return false;
   b.q.push({kind:'unit',type,t:0,total:T.pt});return true;
@@ -1003,7 +1009,7 @@ function updBuilding(b,dt){
     if(q.t>=q.total){b.bq.shift();const a=Math.random()*Math.PI*2;const p=spawn('pack',0,b.x+Math.cos(a)*(b.r+28),b.y+Math.sin(a)*(b.r+28),{ptype:q.type});
       pushEvent(p.x,p.y,TY[q.type].name+' 生成完成，待部署','pack');toast(TY[q.type].name+' 生成完成：選取它 → 部署');}
   }
-  if(!b.q.length&&b.loop){const T=TY[b.loop];if(afford(T.cost)&&popUsed()+T.pop<=popCap()){res.s-=T.cost[0];res.g-=T.cost[1];b.q.push({kind:'unit',type:b.loop,t:0,total:T.pt});}}
+  if(!b.q.length&&b.loop&&!unitReq(b.loop)){const T=TY[b.loop];if(afford(T.cost)&&popUsed()+T.pop<=popCap()){res.s-=T.cost[0];res.g-=T.cost[1];b.q.push({kind:'unit',type:b.loop,t:0,total:T.pt});}}
   const q=b.q[0];if(!q)return;
   q.t+=dt;
   if(q.t<q.total)return;
@@ -1640,6 +1646,7 @@ function updCmds(){
   cmdBtns.forEach(b=>{const d=b._d;
     b.classList.toggle('on',!!(d.on&&d.on()));
     if(d.cost)b.classList.toggle('poor',!afford(d.cost));
+    if(d.unit){const lk=unitReq(d.unit);b.classList.toggle('off',!!lk);const c=b.querySelector('.cost');if(c)c.textContent=lk||costTxt(d.cost);}
     if(d.place&&mode&&mode.k==='place')b.classList.toggle('off',!placeCheck(mode.type,mode.x,mode.y,FAC==='mech'?mode.src:null).ok||(FAC!=='mech'&&!afford(TY[mode.type].cost)));
     let badge='';
     if(d.unit&&k.k==='bld'){const n=k.es.reduce((s,x)=>s+x.q.filter(q=>q.type===d.unit).length,0);const lp=k.es.some(x=>x.loop===d.unit);badge=(lp?'∞':'')+(n?n:'');}
