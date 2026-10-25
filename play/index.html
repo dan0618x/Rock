@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#10120f">
+<link rel="manifest" href="manifest.webmanifest">
+<title>殘域 MVP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Noto+Sans+TC:wght@500;700&display=swap">
+  <script type="module" crossorigin src="./assets/index-B-bkI-z_.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BM1v9EKN.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="cv" aria-label="戰場"></canvas>
+
+  <div class="hud" id="tl">
+    <canvas id="mm" aria-label="小地圖"></canvas>
+    <div id="tlBtns">
+      <button class="mini" id="btnClear" aria-label="取消選取">✕</button>
+      <button class="mini" id="btnArmy" aria-label="全部部隊">全</button>
+      <button class="mini" id="btnIdle" aria-label="閒置工兵">閒</button>
+    </div>
+  </div>
+
+  <div class="hud" id="msg"><div id="toast" style="opacity:0"></div><div id="gest" style="opacity:0"></div></div>
+
+  <div class="hud" id="topR">
+    <div class="resbox">
+      <span class="clock" id="clock">0:00</span>
+      <span class="res" title="廢料"><i class="ico s"></i><span id="rs">0</span></span>
+      <span class="res" title="輻能氣"><i class="ico g"></i><span id="rg">0</span><small id="rgr"></small></span>
+      <span class="pop" id="popEl">人口 <b id="pu">0</b>/<span id="pc">0</span></span>
+    </div>
+    <button class="icobtn" id="btnFs" aria-label="全螢幕">⛶</button>
+    <button class="icobtn" id="btnSet" aria-label="選單">☰</button>
+  </div>
+
+  <div class="hud" id="evWrap"><button id="evBtn" aria-label="跳到最新事件"><span class="ch">!</span><span class="lb">事件</span></button></div>
+
+  <div class="hud" id="bottom">
+    <div id="cats"></div>
+    <div id="mid"><div id="selRow"><div id="selInfo"></div><button class="mini qx" id="qCancel" hidden>✕ 取消</button></div><div id="slots"></div></div>
+    <div id="cmdArea"></div>
+  </div>
+
+  <div id="pop" hidden></div>
+
+  <div class="sheet" id="intro">
+    <div class="card">
+      <h1>殘域</h1>
+      <p class="sub">拾荒者內戰・對電腦（MVP 測試版）</p>
+      <div class="rot">建議把手機橫放，這個遊戲是為橫屏設計的。</div>
+      <p>你在左下角，電腦在右上角。採集廢料、蓋兵營、出兵，<b>摧毀對方所有主堡</b>就獲勝。</p>
+      <div class="row2">
+        <button class="ghost" data-open="helpSheet">操作說明</button>
+        <button class="gobtn" id="btnGo">開始對戰</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="helpSheet" hidden>
+    <div class="card">
+      <h1>操作說明</h1>
+      <h2>地圖</h2>
+      <ul>
+        <li><b>點一下</b>：選取自己的單位或建築</li>
+        <li><b>連點兩下</b>：選取畫面內所有同種單位</li>
+        <li><b>按住 0.5 秒</b>：圈選，放開就選取圈內單位</li>
+        <li><b>單指拖曳</b>移動鏡頭，<b>雙指</b>縮放</li>
+        <li>有選取時：<b>點地面</b>移動（不開火）、<b>點敵人</b>攻擊、工兵<b>點廢料</b>採集</li>
+        <li>選取生產建築後點地圖：設定<b>集結點</b></li>
+      </ul>
+      <h2>按鈕</h2>
+      <ul>
+        <li><b>左下</b>：建築、工兵、地面、空軍分類，選取後鏡頭跳過去</li>
+        <li><b>中下編隊</b>：點空格存入、點一下選取、長按加入、連點兩下管理</li>
+        <li><b>右下</b>：部隊的大圓鈕是「攻擊」，按下就向附近敵人開火；工兵可以建造</li>
+        <li><b>右側「事件」</b>：跳到最近發生的事（被攻擊、完成建造）</li>
+        <li>生產按鈕<b>長按</b>：循環生產</li>
+      </ul>
+      <h2>經濟與科技</h2>
+      <ul>
+        <li><b>廢料</b>：工兵採集，每座主堡最多 8 個工兵採集</li>
+        <li><b>輻能氣</b>：蓋抽氣塔，太靠近彼此會互搶產量</li>
+        <li><b>人口</b>：開局 10，在主堡「擴建」增加，最多 50</li>
+        <li><b>主堡 Lv2</b>：解鎖空軍基地與火箭兵；重甲兵需要空軍基地</li>
+        <li>建築要工兵在旁邊才會蓋；工兵離開就暫停，選工兵點它就繼續</li>
+      </ul>
+      <h2>相剋</h2>
+      <ul>
+        <li>槍兵便宜、打輕甲強；火箭兵能對空、打重甲與空軍強</li>
+        <li>重甲兵血厚、近戰打步兵強，但不能對空</li>
+        <li>渦輪機翼兵能對地也能對空，怕火箭兵和砲塔</li>
+      </ul>
+      <div class="row2"><span></span><button class="gobtn" data-close="helpSheet">關閉</button></div>
+    </div>
+  </div>
+
+  <div class="sheet" id="setSheet" hidden>
+    <div class="card">
+      <h1>選單</h1>
+      <div id="setList"></div>
+      <div class="row2">
+        <button class="ghost warn" id="btnSurrender">投降</button>
+        <span class="row2r"><button class="ghost" data-open="helpSheet">操作說明</button><button class="gobtn" data-close="setSheet">繼續</button></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="endSheet" hidden>
+    <div class="card">
+      <h1 id="endTitle">勝利</h1>
+      <p class="sub" id="endSub"></p>
+      <table class="stats" id="endStats"></table>
+      <div class="row2"><span></span><button class="gobtn" id="btnAgain">再來一場</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
