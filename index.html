@@ -1677,7 +1677,10 @@ function refreshCmds(force){
     box.classList.toggle('grid',grid);
     box.style.gridTemplateColumns=grid?'repeat('+Math.min(3,d.defs.length)+',var(--b))':'';
     const all=[...d.defs,...d.skills].map((x,i)=>{const b=mkBtn(Object.assign({},x,{cls:(x.cls||'')+(grid?' cell':i?' sec':' prim')+(x.cost?' hascost':'')}));box.appendChild(b);cmdBtns.push(b);return b;});
-    if(!grid)layoutArc(all[0],all.slice(1));
+    // 建築格狀排列：第一個在右下角，由右到左、由下到上
+    if(grid){const cols=Math.min(3,all.length),rows=Math.ceil(all.length/cols);
+      all.forEach((b,i)=>{b.style.gridColumn=String(cols-i%cols);b.style.gridRow=String(rows-Math.floor(i/cols));});}
+    else layoutArc(all[0],all.slice(1));
   }
   updCmds();
 }
