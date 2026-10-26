@@ -9,6 +9,7 @@ import { resetHints, tickHints } from './hints';
 import { circleState, initInput, stepInput } from './input';
 import { C, draw, initRender, resizeRender, w2s } from './render';
 import { ME, PAD, cam, issue, newGame, now, st, view } from './state';
+import { VERSION } from './version';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const TICK_MS = 50;
@@ -161,6 +162,7 @@ function frame() {
 }
 
 async function boot() {
+  for (const el of document.querySelectorAll('.ver')) el.textContent = VERSION;
   loadSettings();
   await initRender($('#cv') as HTMLCanvasElement);
   initHud();
