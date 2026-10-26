@@ -1,5 +1,5 @@
 // 戰場繪製（PixiJS）：只讀模擬狀態，位置在兩個邏輯步之間補間。
-import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { MINE_CAP, PROD, PUMP, TY } from '../sim/data';
 import { S as SUB } from '../sim/math';
 import { GH, GW } from '../sim/nav';
@@ -22,6 +22,16 @@ const L = {
 const screen = new Graphics();
 
 interface View { root: Container; body: Graphics; label: Text; extra?: Graphics; turn?: Container; ghost?: boolean }
+
+/** 單位圖：朝上、錨點在身體中心；body = 身體寬佔圖寬的比例，k = 身體畫成碰撞直徑的幾倍 */
+const ART: Record<string, { body: number; k: number }> = {
+  worker: { body: 0.412, k: 1.56 }, // 人操作機器，畫得比槍兵大約 1.25 倍，碰撞大小不變
+  rifle: { body: 0.355, k: 1.15 },
+  srocket: { body: 0.362, k: 1.15 },
+  heavy: { body: 0.659, k: 1.15 },
+  turbo: { body: 0.318, k: 1 },
+};
+const tex: Record<string, Texture> = {};
 const views = new Map<number, View>();
 const ghostViews = new Map<number, View>();
 const status = new Map<number, Text>();
@@ -35,6 +45,8 @@ export async function initRender(canvas: HTMLCanvasElement) {
     resolution: Math.min(2, window.devicePixelRatio || 1), width: window.innerWidth, height: window.innerHeight,
   });
   app.ticker.stop();
+  // 單位圖載不到就照舊畫幾何圖形
+  await Promise.all(Object.keys(ART).map(async k => { try { tex[k] = await Assets.load('art/units/' + k + '.webp'); } catch { /* 沿用幾何圖形 */ } }));
   app.stage.addChild(world, screen);
   world.addChild(L.ground, L.res, L.under, L.bld, L.gnd, L.shots, L.airShadow, L.air, L.fog, L.over, L.texts);
   drawGround();
@@ -85,6 +97,16 @@ function drawGround() {
 /** 建築外形：圓角方塊，角落不超出碰撞圓太多，相鄰建築看起來不會重疊 */
 const bldShape = (g: Graphics, x: number, y: number, r: number) => { const h = r * 0.86; return g.roundRect(x - h, y - h, h * 2, h * 2, r * 0.3); };
 
+/** 單位圖放進一個會轉向的容器；圖朝上，容器的 0 度朝右，所以圖先轉 90 度 */
+function artTurn(type: string, r: number) {
+  const a = ART[type], sp = new Sprite(tex[type]), turn = new Container();
+  sp.anchor.set(0.5);
+  sp.width = sp.height = (r * 2 * a.k) / a.body;
+  sp.rotation = Math.PI / 2;
+  turn.addChild(sp);
+  return turn;
+}
+
 const mkLabel = (ch: string, size: number, color: number) => {
   const t = new Text({ text: ch, style: { fontFamily: FONT, fontSize: Math.round(size), fontWeight: '700', fill: color } });
   t.anchor.set(0.5);
@@ -112,6 +134,18 @@ function makeView(e: Ent, ghost = false): View {
     if (ghost) root.alpha = 0.45;
     L.bld.addChild(root);
     return { root, body, label, ghost };
+  }
+  if (tex[e.type] && !ghost) {
+    // 隊伍色只畫在底圈，圖本身是中性色；底圈跟著圖的身體大小，才不會被圖蓋住
+    body.circle(0, 0, r * ART[e.type].k * 1.05).fill({ color: col, alpha: 0.28 }).stroke({ width: 2.5, color: col });
+    const turn = artTurn(e.type, r);
+    label = mkLabel('', 10, 0);
+    const extra = new Graphics();
+    extra.circle(r * 0.7, -r * 0.7, 4).fill(C.scrap);
+    extra.visible = false;
+    root.addChild(body, turn, extra);
+    (isAir(e) ? L.air : L.gnd).addChild(root);
+    return { root, body, label, extra, turn };
   }
   if (isAir(e)) {
     const turn = new Container();
@@ -216,9 +250,9 @@ export function draw(alpha: number, circle: { sx: number; sy: number; r: number 
     } else {
       if (isAir(e)) {
         v.root.y = p.y - 6;
-        v.turn!.rotation = Math.atan2(e.fy, e.fx);
         shadow.ellipse(p.x + 6, p.y + 14, r * 0.9, r * 0.45).fill({ color: 0x000000, alpha: 0.3 });
       } else if (v.extra) v.extra.visible = e.carry > 0;
+      if (v.turn) v.turn.rotation = turnToward(v.turn.rotation, Math.atan2(e.fy, e.fx));
       v.body.alpha = 1;
     }
     // 彈道
@@ -298,6 +332,13 @@ export function draw(alpha: number, circle: { sx: number; sy: number; r: number 
   screen.clear();
   if (circle) screen.circle(circle.sx, circle.sy, circle.r).fill({ color: C.ok, alpha: 0.12 }).stroke({ width: 2, color: C.ok });
   app.render();
+}
+
+/** 轉向補間：每幀往目標角度轉一部分，走最短的方向 */
+function turnToward(a: number, b: number) {
+  let d = b - a;
+  d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+  return Math.abs(d) < 0.01 ? b : a + d * 0.3;
 }
 
 function dashed(g: Graphics, x1: number, y1: number, x2: number, y2: number, color: number, width: number) {
