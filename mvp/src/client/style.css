@@ -32,7 +32,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* 左上：小地圖 + 三鈕 */
 #tl{top:calc(env(safe-area-inset-top,0px) + 10px);left:max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:6px;align-items:flex-start}
-#mm{display:block;width:clamp(120px,19vw,190px);aspect-ratio:3/2;max-width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel-solid);touch-action:none}
+#mm{display:block;width:clamp(100px,15vw,150px);aspect-ratio:1/1;max-width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel-solid);touch-action:none}
 #tlBtns{display:flex;gap:6px}
 .mini{width:36px;height:36px;border-radius:9px;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;position:relative;cursor:pointer;font-weight:700;font-size:14px;padding:0}
 .bdg{position:absolute;top:-5px;right:-5px;background:var(--accent);color:#231a08;border-radius:9px;font-size:10px;min-width:17px;height:17px;display:grid;place-items:center;font-family:var(--num);padding:0 3px}
@@ -198,3 +198,13 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn .lock{position:absolute;bottom:3px;left:0;right:0;text-align:center;font-size:8.5px;color:var(--bad);line-height:1}
 #toast.hint{border-color:var(--accent);color:#ffe7bd;white-space:normal;text-align:center;border-radius:12px}
 .ver{margin-left:8px;font-family:var(--num);font-size:12px;font-weight:500;color:var(--dim);letter-spacing:0}
+.kgrid{grid-template-columns:repeat(4,64px)}
+.kgrid .btile .bc{font-family:var(--ui);font-size:10px;white-space:nowrap}
+.btn.key .badge{color:var(--fg);font-size:10px}
+.btn.key.off{opacity:.45}
+.kgrid{grid-template-columns:repeat(6,56px);gap:5px}
+.kgrid .btile{width:56px;height:56px;gap:3px}
+.kgrid .btile .bi{width:24px;height:24px;font-size:13px}
+.kgrid .btile .bc{font-size:9.5px}
+.kgrid{grid-template-columns:repeat(7,52px);gap:4px}
+.kgrid .btile{width:52px;height:52px}

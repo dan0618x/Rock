@@ -3,7 +3,7 @@
 import { MAP_H, MAP_W, PROD, TY, type TypeId } from '../sim/data';
 import { S, dist2, px, randInt } from '../sim/math';
 import {
-  K, afford, baseOf, buildReq, canSee, check, fieldSpot, isB, isCombat, isRes, nextUp, own, placeCheck,
+  FIELD_COUNT, K, afford, baseOf, buildReq, canSee, check, fieldSpot, isB, isCombat, isRes, nextUp, own, placeCheck,
   plannedSites, popCap, popUsed, unitReq, upInProgress, type Game,
 } from '../sim/sim';
 import type { Cmd, Ent, Team } from '../sim/types';
@@ -82,6 +82,7 @@ export class Bot {
     const pumps = this.count(g, 'pump'), barracks = this.count(g, 'barracks'), airbase = this.count(g, 'airbase');
     const turrets = this.count(g, 'turret'), bases = this.count(g, 'base');
     const done = (ty: TypeId) => own(g, t, e => e.type === ty && e.built).length;
+    const labs = this.count(g, 'lab');
     let want: TypeId | null = null;
     if (pumps < 1 && workers >= 5) want = 'pump';
     else if (barracks < 1) want = 'barracks';
@@ -90,11 +91,16 @@ export class Bot {
     else if (bases < 2 && sec > 330) want = 'base';
     else if (turrets < 1 && sec > 240) want = 'turret';
     else if (barracks < 2 && sec > 300 && T.scrap > 250 * K) want = 'barracks';
-    else if (pumps < 3 && bases >= 2 && done('base') >= 2) want = 'pump';
+    else if (T.baseLv >= 3 && labs < 1) want = 'lab';
+    else if (pumps < 4 && bases >= 2 && done('base') >= 2) want = 'pump';
     else if (barracks < 3 && sec > 540 && T.scrap > 400 * K) want = 'barracks';
-    // 主堡升級
+    else if (airbase < 2 && sec > 600 && T.gas > 300 * K) want = 'airbase';
+    else if (bases < 3 && sec > 720 && T.scrap > 500 * K) want = 'base';
+    else if (barracks < 4 && T.scrap > 800 * K) want = 'barracks';
+    // 主堡升級：Lv2 有兵營就升，Lv3 有空軍基地後，Lv4 有研究所後
     const bs = own(g, t, e => e.type === 'base' && e.built);
-    if (done('barracks') >= 1 && T.baseLv < 2 && !upInProgress(g, t, 'upg') && bs.length) {
+    const upOk = (T.baseLv === 1 && done('barracks') >= 1) || (T.baseLv === 2 && done('airbase') >= 1 && sec > 360) || (T.baseLv === 3 && done('lab') >= 1 && sec > 600);
+    if (upOk && !upInProgress(g, t, 'upg') && bs.length) {
       const n = nextUp(g, t, 'upg');
       if (!n.max && afford(g, t, n.cost)) push({ c: 'up', ids: bs.map(b => b.id), kind: 'upg' });
     }
@@ -105,9 +111,13 @@ export class Bot {
     if (w) push({ c: 'build', ids: [w.id], type: want, x: spot.x, y: spot.y });
   }
 
+  /** 依序找還沒蓋主堡的擴張點 */
   private expansionSpot(g: Game) {
-    const s = fieldSpot(this.team, 0);
-    return placeCheck(g, this.team, 'base', s.x, s.y).ok ? s : null;
+    for (let i = 0; i < FIELD_COUNT; i++) {
+      const s = fieldSpot(this.team, i);
+      if (placeCheck(g, this.team, 'base', s.x, s.y).ok) return s;
+    }
+    return null;
   }
 
   /** 在主堡周圍找空地：優先朝地圖中央那一側，避開廢料堆，抽氣塔彼此分開 */
@@ -139,20 +149,35 @@ export class Bot {
     return best;
   }
 
+  /** 選兵：先依看到的敵方兵種補剋制，其餘照固定比例補最缺的 */
   private pickUnit(g: Game, b: Ent): TypeId | null {
     const t = this.team;
     const list = (PROD[b.type] || []).filter(u => !unitReq(g, t, u) && afford(g, t, TY[u].cost));
     if (!list.length) return null;
-    if (b.type === 'airbase') return list[0];
     const army = own(g, t, isCombat);
     const n = (ty: TypeId) => army.filter(e => e.type === ty).length;
-    const air = (this.seen.turbo || 0), rifles = (this.seen.rifle || 0), heavies = (this.seen.heavy || 0);
     const has = (u: TypeId) => list.includes(u);
-    if (has('srocket') && (air > 0 || heavies > 1) && n('srocket') < Math.max(2, air * 2 + heavies)) return 'srocket';
-    if (has('heavy') && rifles >= 4 && n('heavy') * 3 < n('rifle') + 3) return 'heavy';
-    if (has('srocket') && n('srocket') * 3 < army.length) return 'srocket';
-    if (has('heavy') && n('heavy') * 4 < army.length) return 'heavy';
-    return has('rifle') ? 'rifle' : list[0];
+    const seen = (...ts: TypeId[]) => ts.reduce((s, k) => s + (this.seen[k] || 0), 0);
+    if (b.type === 'airbase') {
+      if (has('jetpack') && n('jetpack') < 1) return 'jetpack';
+      const aa = seen('srocket', 'walker', 'turbo', 'glider');
+      const mix: [TypeId, number][] = aa > 8 ? [['divebomber', 2], ['glider', 5], ['turbo', 3]] : [['turbo', 5], ['glider', 3], ['divebomber', 2]];
+      return this.byMix(mix.filter(([u]) => has(u)), n) || null;
+    }
+    const air = seen('turbo', 'glider', 'divebomber'), armored = seen('heavy', 'walker'), light = seen('rifle', 'srocket', 'biker');
+    const anti = n('srocket') + n('walker') * 2;
+    if (air > 0 && anti < air * 2 + 2) return has('walker') && n('walker') * 2 < n('srocket') ? 'walker' : has('srocket') ? 'srocket' : has('walker') ? 'walker' : list[0];
+    if (armored >= 3 && has('srocket') && n('srocket') < armored * 2) return 'srocket';
+    if (light >= 6 && has('heavy') && n('heavy') * 3 < light) return 'heavy';
+    const mix: [TypeId, number][] = [['rifle', 7], ['srocket', 5], ['heavy', 3], ['biker', 3], ['walker', 2]];
+    return this.byMix(mix.filter(([u]) => has(u)), n) || list[0];
+  }
+  private byMix(mix: [TypeId, number][], n: (t: TypeId) => number): TypeId | null {
+    let best: TypeId | null = null, bs = Infinity;
+    const total = mix.reduce((s, [, w]) => s + w, 0);
+    const have = mix.reduce((s, [u]) => s + n(u), 0) + 1;
+    for (const [u, w] of mix) { const sc = n(u) / have - w / total; if (sc < bs) { bs = sc; best = u; } }
+    return best;
   }
 
   private army(g: Game, push: (c: Cmd) => void) {
@@ -168,7 +193,12 @@ export class Bot {
       const u = this.pickUnit(g, b);
       if (u) push({ c: 'produce', ids: [b.id], type: u });
     }
-    const army = own(g, t, isCombat);
+    // 噴射包兵沒有攻擊力，拿來在中路與敵方擴張點之間巡邏偵察
+    for (const j of own(g, t, e => e.type === 'jetpack' && e.order.k === 'idle')) {
+      const s = fieldSpot(this.enemy, 0);
+      push({ c: 'patrol', ids: [j.id], x: s.x, y: s.y });
+    }
+    const army = own(g, t, e => isCombat(e) && e.type !== 'jetpack');
     const pop = army.reduce((s, e) => s + (TY[e.type].pop || 0), 0);
     // 防守：己方建築附近有敵人
     const mine = own(g, t, isB);

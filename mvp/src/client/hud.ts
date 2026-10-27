@@ -5,9 +5,10 @@ import { GH, GW } from '../sim/nav';
 import {
   K, afford, buildReq, builderOf, isB, isCombat, minersOf, nextUp, popCap, popUsed, unitReq, upInProgress,
 } from '../sim/sim';
+import { TERRAIN } from '../sim/map';
 import type { Ent } from '../sim/types';
 import {
-  armyAttack, camTo, cancelCurrent, cancelSite, clampCam, confirmPlace, defZ, enterPlace, jumpTo, marker, nm, placeOk,
+  armyAttack, cycleForm, formName, holdCmd, patrolMode, camTo, cancelCurrent, cancelSite, clampCam, confirmPlace, defZ, enterPlace, jumpTo, marker, nm, placeOk,
   produce, recall, selectAndJump, setMode, setSel, stopCamAnim, toggleLoop, upgrade, clearMode,
 } from './actions';
 import { C } from './render';
@@ -98,6 +99,7 @@ const pop = () => $('#pop');
 export function openPop(anchor: HTMLElement, render: (p: HTMLElement) => void) {
   popAnchor = anchor;
   pop().hidden = false;
+  pop().style.maxWidth = '';
   render(pop());
   placePop();
   document.querySelectorAll('.cat').forEach(c => c.classList.toggle('open', c === anchor));
@@ -119,46 +121,83 @@ export const popIsOpen = () => !pop().hidden;
 export const popAnchorIsCat = () => !!popAnchor && popAnchor.classList.contains('cat');
 export const popContains = (t: EventTarget | null) => pop().contains(t as Node) || (!!popAnchor && popAnchor.contains(t as Node));
 
-// ---------- 左下分類（選取後鏡頭跳過去，選單保持開啟） ----------
-const CATS: [string, string, string][] = [['building', '建', '建築'], ['worker', '工', '工兵'], ['ground', '地', '地面'], ['air', '空', '空軍']];
-function buildCats() {
+// ---------- 左下快捷鍵：點一下直接選取（鏡頭跳過去），長按換成別的 ----------
+interface Preset { id: string; ch: string; lb: string; list: () => Ent[] }
+const unitPreset = (t: TypeId): Preset => ({ id: 'u:' + t, ch: TY[t].ch, lb: TY[t].name, list: () => own(e => e.type === t) });
+const bldPreset = (t: TypeId): Preset => ({ id: 'b:' + t, ch: TY[t].ch, lb: TY[t].name, list: () => own(e => e.type === t && e.built) });
+const PRESETS: Preset[] = [
+  bldPreset('barracks'), bldPreset('airbase'), bldPreset('base'), bldPreset('lab'), bldPreset('turret'), bldPreset('pump'),
+  { id: 'g:ground', ch: '地', lb: '地面部隊', list: () => own(e => TY[e.type].cat === 'ground') },
+  { id: 'g:air', ch: '翼', lb: '空軍部隊', list: () => own(e => TY[e.type].cat === 'air') },
+  { id: 'g:army', ch: '全', lb: '全部部隊', list: () => own(isCombat) },
+  { id: 'g:workers', ch: '工', lb: '全部工兵', list: () => own(e => e.type === 'worker') },
+  { id: 'g:idle', ch: '閒', lb: '閒置工兵', list: () => own(e => e.type === 'worker' && e.order.k === 'idle') },
+  ...(['rifle', 'srocket', 'heavy', 'biker', 'walker', 'jetpack', 'turbo', 'glider', 'divebomber'] as TypeId[]).map(unitPreset),
+];
+const DEFAULT_KEYS = ['b:barracks', 'b:airbase', 'g:ground', 'g:air'];
+let keys: string[] = DEFAULT_KEYS.slice();
+try { const k = JSON.parse(localStorage.getItem('rtsMvpKeys') || 'null'); if (Array.isArray(k) && k.length === 4 && k.every(x => PRESETS.some(p => p.id === x))) keys = k; } catch { /* 用預設 */ }
+const presetOf = (id: string) => PRESETS.find(p => p.id === id)!;
+const keyEls: HTMLButtonElement[] = [];
+function buildKeys() {
   const box = $('#cats');
   box.innerHTML = '';
-  for (const [cat, ch, lb] of CATS)
-    box.appendChild(mkBtn({ ch, lb, cls: 'cat', onTap: el => { if (popAnchor === el) { closePop(); return; } openPop(el, p => renderCat(p, cat)); } }));
+  keyEls.length = 0;
+  keys.forEach((_id, i) => {
+    const el = mkBtn({ ch: '', lb: '', cls: 'cat key', onTap: () => keyTap(i), onLong: el2 => keyEdit(i, el2) });
+    box.appendChild(el);
+    keyEls.push(el);
+  });
+  renderKeys();
 }
-const sameSel = (l: Ent[]) => l.length > 0 && l.length === st.sel.size && l.every(e => st.sel.has(e.id));
-function renderCat(p: HTMLElement, cat: string) {
-  const title = CATS.find(c => c[0] === cat)![2];
-  p.innerHTML = '<div class="ptitle">' + title + '</div>';
-  const g = document.createElement('div');
-  g.className = 'bgrid';
-  const choose = (l: Ent[], key: string, msg: string) => { selectAndJump(l, key, '<b>分類選單</b> → ' + msg, true); renderCat(p, cat); placePop(); };
-  const tile = (ch: string, l: Ent[], key: string, label: string, o: { round?: boolean; note?: string } = {}) => {
-    const b = document.createElement('button');
-    b.className = 'btile' + (l.length ? '' : ' poor') + (sameSel(l) ? ' cur' : '');
-    b.setAttribute('aria-label', label);
-    b.innerHTML = '<span class="bi' + (o.round ? ' rd' : '') + '">' + ch + '</span><span class="bc">' + l.length + (o.note ? '<em>' + o.note + '</em>' : '') + '</span>';
-    if (l.length) bindPress(b, () => choose(l, key, label + '×' + l.length));
-    g.appendChild(b);
-  };
-  if (cat === 'worker') {
-    const ws = own(e => e.type === 'worker');
-    tile('工', ws, 'cat:w', '全部工兵', { round: true });
-    tile('閒', ws.filter(e => e.order.k === 'idle'), 'cat:wi', '閒置工兵', { round: true });
-  } else if (cat === 'building') {
-    const list = own(isB);
-    countBy(list).forEach((_n, t) => {
-      const l = list.filter(e => e.type === t);
-      tile(TY[t].ch, l, 'cat:' + t, TY[t].name, { note: l.some(b => b.q.length) ? '產' : '' });
-    });
-  } else {
-    const list = own(e => TY[e.type].cat === cat);
-    tile('全', list, 'cat:all' + cat, '全部' + title);
-    countBy(list).forEach((_n, t) => tile(TY[t].ch, list.filter(e => e.type === t), 'cat:' + t, TY[t].name, { round: true }));
-  }
-  if (!g.children.length) g.innerHTML = '<div class="phint">目前沒有</div>';
-  p.appendChild(g);
+function renderKeys() {
+  if (!st.g) return;
+  keyEls.forEach((el, i) => {
+    const p = presetOf(keys[i]), n = p.list().length;
+    el.querySelector('.ch')!.textContent = p.ch;
+    el.querySelector('.lb')!.textContent = p.lb;
+    el.querySelector('.badge')!.textContent = n ? String(n) : '';
+    el.classList.toggle('off', !n);
+    el.setAttribute('aria-label', p.lb);
+  });
+}
+function keyTap(i: number) {
+  const p = presetOf(keys[i]), l = p.list();
+  if (!l.length) { toast('目前沒有' + p.lb + '（長按這個鈕可以換成別的快捷）'); return; }
+  selectAndJump(l, 'key:' + p.id, '<b>快捷 ' + p.lb + '</b> → ' + l.length + ' 個');
+}
+function keyEdit(i: number, el: HTMLElement) {
+  gesture('<b>長按快捷鍵</b> → 換成別的');
+  openPop(el, p => {
+    p.style.maxWidth = 'min(440px, 94vw)';
+    p.innerHTML = '<div class="ptitle">快捷鍵 ' + (i + 1) + '：點一下換成</div>';
+    const g = document.createElement('div');
+    g.className = 'bgrid kgrid';
+    for (const pr of PRESETS) {
+      const b = document.createElement('button');
+      b.className = 'btile' + (pr.id === keys[i] ? ' cur' : '');
+      b.setAttribute('aria-label', pr.lb);
+      b.innerHTML = '<span class="bi' + (pr.id.startsWith('b:') ? '' : ' rd') + '">' + pr.ch + '</span><span class="bc">' + pr.lb + '</span>';
+      bindPress(b, () => {
+        keys[i] = pr.id;
+        try { localStorage.setItem('rtsMvpKeys', JSON.stringify(keys)); } catch { /* 略過 */ }
+        closePop();
+        renderKeys();
+        toast('快捷鍵 ' + (i + 1) + ' 改成「' + pr.lb + '」');
+      });
+      g.appendChild(b);
+    }
+    p.appendChild(g);
+    const r = document.createElement('div');
+    r.className = 'prow-actions';
+    r.style.marginTop = '8px';
+    const reset = document.createElement('button');
+    reset.className = 'pbtn';
+    reset.textContent = '四個鍵都恢復預設';
+    bindPress(reset, () => { keys = DEFAULT_KEYS.slice(); try { localStorage.removeItem('rtsMvpKeys'); } catch { /* 略過 */ } closePop(); renderKeys(); });
+    r.appendChild(reset);
+    p.appendChild(r);
+  });
 }
 
 // ---------- 中下編隊 ----------
@@ -306,6 +345,9 @@ function cmdDefs(): { k: ReturnType<typeof selKind>; defs: Def[]; place?: boolea
     defs.push({ ch: '建', lb: '建造', onTap: el => { if (popAnchor === el) { closePop(); return; } openPop(el, renderBuild); } });
   } else if (k.k === 'army') {
     defs.push({ ch: '攻', lb: '攻擊', on: () => isFiring(selEnts()), onTap: () => armyAttack(selEnts()) });
+    defs.push({ ch: '巡', lb: '巡邏', on: () => !!st.mode && st.mode.k === 'patrol' || selEnts().some(e => e.order.k === 'patrol'), onTap: () => patrolMode() });
+    defs.push({ ch: '守', lb: '駐守', on: () => { const es = selEnts().filter(isCombat); return es.length > 0 && es.every(e => e.order.k === 'hold'); }, onTap: () => holdCmd(selEnts()) });
+    defs.push({ ch: '陣', lb: formName(), onTap: () => cycleForm() });
   } else {
     const bs = k.es, t = k.type;
     if (bs.every(b => !b.built)) { defs.push({ ch: '✕', lb: '取消建造', onTap: () => cancelSite(selKind().es) }); return { k, defs }; }
@@ -446,6 +488,7 @@ function renderSelInfo() {
 const mmss = (sec: number) => Math.floor(sec / 60) + ':' + String(Math.floor(sec % 60)).padStart(2, '0');
 let lastRate = '';
 export function refreshHUD() {
+  renderKeys();
   const g = st.g, T = g.teams[ME];
   $('#clock').textContent = mmss(g.tick / 20);
   $('#rs').textContent = String(Math.floor(T.scrap / K));
@@ -484,6 +527,10 @@ export function drawMini() {
   mctx.setTransform(1, 0, 0, 1, 0, 0);
   mctx.fillStyle = '#2b3427';
   mctx.fillRect(0, 0, w, h);
+  for (const t of TERRAIN) {
+    mctx.fillStyle = t.kind === 'acid' ? '#55782f' : '#5a5346';
+    mctx.beginPath(); mctx.arc(t.x * sx, t.y * sy, Math.max(1.5 * dpr, t.r * sx), 0, 7); mctx.fill();
+  }
   const f = g.fog[ME];
   for (const e of g.ents) {
     const isRes = TY[e.type].cat === 'res';
@@ -551,7 +598,7 @@ export function measurePad(pad: { l: number; r: number; t: number; b: number }) 
 }
 
 export function initHud() {
-  buildCats();
+  buildKeys();
   buildSlots();
   initMinimap();
   bindPress($('#btnClear'), () => { setSel([], true); gesture('<b>✕</b> → 取消選取'); });

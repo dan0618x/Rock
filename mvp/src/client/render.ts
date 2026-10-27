@@ -3,6 +3,7 @@ import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 
 import { MINE_CAP, PROD, PUMP, TY } from '../sim/data';
 import { S as SUB } from '../sim/math';
 import { GH, GW } from '../sim/nav';
+import { TERRAIN } from '../sim/map';
 import { builderOf, isAir, isB, isRes, minersOf, placeCheck, plannedSites, visibleAt } from '../sim/sim';
 import type { Ent } from '../sim/types';
 import { ME, W, H, cam, st, view, now } from './state';
@@ -23,13 +24,16 @@ const screen = new Graphics();
 
 interface View { root: Container; body: Graphics; label: Text; extra?: Graphics; turn?: Container; ghost?: boolean }
 
-/** 單位圖：朝上、錨點在身體中心；body = 身體寬佔圖寬的比例，k = 身體畫成碰撞直徑的幾倍 */
-const ART: Record<string, { body: number; k: number }> = {
-  worker: { body: 0.412, k: 1.56 }, // 人操作機器，畫得比槍兵大約 1.25 倍，碰撞大小不變
-  rifle: { body: 0.355, k: 1.15 },
-  srocket: { body: 0.362, k: 1.15 },
-  heavy: { body: 0.659, k: 1.15 },
-  turbo: { body: 0.318, k: 1 },
+/**
+ * 單位圖（朝上）：ax/ay = 圖中內容最小外接圓的圓心（當旋轉中心），ext = 外接圓半徑 / 圖寬。
+ * 整張圖縮到外接圓剛好落在碰撞圓裡面，轉到任何方向都不會超出底圈，單位之間就是圈碰圈。
+ */
+const ART: Record<string, { ax: number; ay: number; ext: number }> = {
+  worker: { ax: 0.5, ay: 0.394, ext: 0.396 },
+  rifle: { ax: 0.503, ay: 0.384, ext: 0.379 },
+  srocket: { ax: 0.556, ay: 0.371, ext: 0.371 },
+  heavy: { ax: 0.565, ay: 0.382, ext: 0.456 },
+  turbo: { ax: 0.531, ay: 0.626, ext: 0.544 },
 };
 const tex: Record<string, Texture> = {};
 const views = new Map<number, View>();
@@ -80,6 +84,7 @@ function drawGround() {
   }
   c.fillStyle = 'rgba(207,224,106,.04)';
   for (let i = 0; i < 80; i++) { c.beginPath(); c.arc((i * 397) % W, (i * 251) % H, 70, 0, 7); c.fill(); }
+  drawTerrain(c);
   c.strokeStyle = 'rgba(255,255,255,.05)';
   c.lineWidth = 2;
   c.beginPath();
@@ -94,14 +99,40 @@ function drawGround() {
   L.ground.height = H;
 }
 
+/** 地形：岩脊用幾個錯開的圓疊出不規則的岩塊；酸池是暗綠色、邊緣發光 */
+function drawTerrain(c: CanvasRenderingContext2D) {
+  let sd = 11;
+  const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  for (const t of TERRAIN) {
+    if (t.kind !== 'acid') continue;
+    const g = c.createRadialGradient(t.x, t.y, t.r * 0.2, t.x, t.y, t.r * 1.15);
+    g.addColorStop(0, 'rgba(40,70,30,1)'); g.addColorStop(0.8, 'rgba(60,95,35,1)'); g.addColorStop(0.92, 'rgba(207,224,106,.55)'); g.addColorStop(1, 'rgba(207,224,106,0)');
+    c.fillStyle = g;
+    c.beginPath(); c.arc(t.x, t.y, t.r * 1.15, 0, 7); c.fill();
+  }
+  const rocks = TERRAIN.filter(t => t.kind === 'rock');
+  // 先畫陰影，再畫岩塊，最後畫亮面
+  c.fillStyle = 'rgba(0,0,0,.35)';
+  for (const t of rocks) { c.beginPath(); c.arc(t.x + 10, t.y + 14, t.r * 1.02, 0, 7); c.fill(); }
+  for (const t of rocks) {
+    for (let i = 0; i < 4; i++) {
+      const a = rnd() * 6.28, d = t.r * 0.25 * rnd(), rr = t.r * (0.72 + rnd() * 0.3);
+      c.fillStyle = i % 2 ? '#4b4438' : '#575043';
+      c.beginPath(); c.arc(t.x + Math.cos(a) * d, t.y + Math.sin(a) * d, rr, 0, 7); c.fill();
+    }
+  }
+  c.fillStyle = 'rgba(236,226,196,.10)';
+  for (const t of rocks) { c.beginPath(); c.arc(t.x - t.r * 0.25, t.y - t.r * 0.3, t.r * 0.45, 0, 7); c.fill(); }
+}
+
 /** 建築外形：圓角方塊，角落不超出碰撞圓太多，相鄰建築看起來不會重疊 */
 const bldShape = (g: Graphics, x: number, y: number, r: number) => { const h = r * 0.86; return g.roundRect(x - h, y - h, h * 2, h * 2, r * 0.3); };
 
 /** 單位圖放進一個會轉向的容器；圖朝上，容器的 0 度朝右，所以圖先轉 90 度 */
 function artTurn(type: string, r: number) {
   const a = ART[type], sp = new Sprite(tex[type]), turn = new Container();
-  sp.anchor.set(0.5);
-  sp.width = sp.height = (r * 2 * a.k) / a.body;
+  sp.anchor.set(a.ax, a.ay);
+  sp.width = sp.height = (r * 0.96) / a.ext;
   sp.rotation = Math.PI / 2;
   turn.addChild(sp);
   return turn;
@@ -136,8 +167,8 @@ function makeView(e: Ent, ghost = false): View {
     return { root, body, label, ghost };
   }
   if (tex[e.type] && !ghost) {
-    // 隊伍色只畫在底圈，圖本身是中性色；底圈跟著圖的身體大小，才不會被圖蓋住
-    body.circle(0, 0, r * ART[e.type].k * 1.05).fill({ color: col, alpha: 0.28 }).stroke({ width: 2.5, color: col });
+    // 隊伍色只畫在底圈（就是碰撞圓），圖本身是中性色、畫在圈裡面
+    body.circle(0, 0, r).fill({ color: col, alpha: 0.22 }).stroke({ width: 2, color: col });
     const turn = artTurn(e.type, r);
     label = mkLabel('', 10, 0);
     const extra = new Graphics();
@@ -148,12 +179,13 @@ function makeView(e: Ent, ghost = false): View {
     return { root, body, label, extra, turn };
   }
   if (isAir(e)) {
-    const turn = new Container();
-    body.poly([r * 1.25, 0, -r * 0.85, r * 0.95, -r * 0.35, 0, -r * 0.85, -r * 0.95]).fill(C.dark).stroke({ width: 2.5, color: col });
-    turn.addChild(body);
-    label = mkLabel(T.ch, r * 0.8, col);
-    label.x = -2;
-    root.addChild(turn, label);
+    // 還沒有圖的空軍：底圈 + 圈內的機翼三角形
+    const turn = new Container(), wing = new Graphics();
+    body.circle(0, 0, r).fill({ color: col, alpha: 0.22 }).stroke({ width: 2, color: col });
+    wing.poly([r * 0.9, 0, -r * 0.62, r * 0.68, -r * 0.25, 0, -r * 0.62, -r * 0.68]).fill(C.dark).stroke({ width: 1.5, color: col });
+    turn.addChild(wing);
+    label = mkLabel(T.ch, r * 0.75, C.fg);
+    root.addChild(body, turn, label);
     L.air.addChild(root);
     return { root, body, label, turn };
   }

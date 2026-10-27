@@ -1,18 +1,22 @@
-// 尋路：建築與廢料堆在格子地圖上標成障礙，地面單位用 A* 繞路，再把路徑拉直。
+// 尋路：建築、廢料堆、地形在格子地圖上標成障礙，地面單位用 A* 找大方向；
+// 能不能直線走則用真正的圓形障礙判斷（不用格子），路徑才會貼著障礙走，不會繞大圈。
 import { MAP_H, MAP_W } from './data';
-import { S, dist2, isqrt } from './math';
+import { S, dist2 } from './math';
 
 export const CELL = 40 * S;
 export const GW = Math.ceil(MAP_W / 40), GH = Math.ceil(MAP_H / 40);
 
-export interface NavGrid { g: Uint8Array; ver: number; dirty: boolean }
+export interface Obstacle { x: number; y: number; r: number; id: number }
+export interface NavGrid { g: Uint8Array; obs: Obstacle[]; ver: number; dirty: boolean }
 
-export const newNav = (): NavGrid => ({ g: new Uint8Array(GW * GH), ver: 0, dirty: true });
+export const newNav = (): NavGrid => ({ g: new Uint8Array(GW * GH), obs: [], ver: 0, dirty: true });
 
-export function rebuildNav(nav: NavGrid, obstacles: { x: number; y: number; r: number }[]) {
+/** 格子：中心點離障礙邊緣不到半格加單位寬就算擋住 */
+export function rebuildNav(nav: NavGrid, obstacles: Obstacle[]) {
   const g = nav.g;
   g.fill(0);
-  const pad = 14 * S + Math.trunc((CELL * 35) / 100);
+  nav.obs = obstacles;
+  const pad = 18 * S;
   for (const o of obstacles) {
     const R = o.r + pad, R2 = R * R;
     const x0 = Math.max(0, Math.floor((o.x - R) / CELL)), x1 = Math.min(GW - 1, Math.floor((o.x + R) / CELL));
@@ -30,21 +34,39 @@ export function blockedAt(nav: NavGrid, x: number, y: number) {
   return gx < 0 || gy < 0 || gx >= GW || gy >= GH || nav.g[gy * GW + gx] === 1;
 }
 
-/** 兩點之間直線是否暢通；ign 是目的地本身（例如要採的廢料堆），它周圍不算擋路 */
-export function los(nav: NavGrid, ax: number, ay: number, bx: number, by: number, ign?: { x: number; y: number; r: number } | null) {
-  const d = isqrt(dist2(ax, ay, bx, by)), step = 12 * S, n = Math.ceil(d / step);
-  const ir = ign ? ign.r + 34 * S : 0;
-  for (let i = 1; i < n; i++) {
-    const x = ax + Math.trunc(((bx - ax) * i) / n), y = ay + Math.trunc(((by - ay) * i) / n);
-    if (ign && dist2(x, y, ign.x, ign.y) < ir * ir) continue;
-    if (blockedAt(nav, x, y)) return false;
+/** 點到線段距離的平方 */
+function segDist2(ax: number, ay: number, bx: number, by: number, cx: number, cy: number) {
+  const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+  const num = (cx - ax) * dx + (cy - ay) * dy;
+  if (len2 === 0 || num <= 0) return dist2(ax, ay, cx, cy);
+  if (num >= len2) return dist2(bx, by, cx, cy);
+  const t = num / len2, px = ax + dx * t, py = ay + dy * t;
+  return (cx - px) * (cx - px) + (cy - py) * (cy - py);
+}
+
+/** 半徑 rad 的單位能不能從 a 直線走到 b；ign 是目的地本身（例如要採的廢料堆），不算擋路 */
+export function los(nav: NavGrid, ax: number, ay: number, bx: number, by: number, rad: number, ignId = 0) {
+  const minX = Math.min(ax, bx), maxX = Math.max(ax, bx), minY = Math.min(ay, by), maxY = Math.max(ay, by);
+  for (const o of nav.obs) {
+    if (o.id === ignId && ignId) continue;
+    const m = o.r + rad;
+    if (o.x + m < minX || o.x - m > maxX || o.y + m < minY || o.y - m > maxY) continue;
+    // 起點已經貼著或卡在障礙裡時，只要不是往障礙裡面走就放行
+    if (dist2(ax, ay, o.x, o.y) < m * m && dist2(bx, by, o.x, o.y) >= dist2(ax, ay, o.x, o.y)) continue;
+    if (segDist2(ax, ay, bx, by, o.x, o.y) < m * m) return false;
   }
   return true;
 }
 
-function nearFree(nav: NavGrid, gx: number, gy: number): number {
+/** 這個點有沒有在障礙裡（給隊形位置用） */
+export function insideObstacle(nav: NavGrid, x: number, y: number, rad: number) {
+  for (const o of nav.obs) { const m = o.r + rad; if (dist2(x, y, o.x, o.y) < m * m) return true; }
+  return x < rad || y < rad || x > MAP_W * S - rad || y > MAP_H * S - rad;
+}
+
+function nearFreeCell(nav: NavGrid, gx: number, gy: number): number {
   if (gx >= 0 && gy >= 0 && gx < GW && gy < GH && !nav.g[gy * GW + gx]) return gy * GW + gx;
-  for (let r = 1; r < 10; r++) {
+  for (let r = 1; r < 14; r++) {
     let best = -1, bd = 1e9;
     for (let dy = -r; dy <= r; dy++)
       for (let dx = -r; dx <= r; dx++) {
@@ -58,14 +80,20 @@ function nearFree(nav: NavGrid, gx: number, gy: number): number {
   }
   return -1;
 }
+/** 最近的空地（格子中心，模擬單位） */
+export function nearFree(nav: NavGrid, x: number, y: number) {
+  const i = nearFreeCell(nav, Math.floor(x / CELL), Math.floor(y / CELL));
+  if (i < 0) return { x, y };
+  return { x: (i % GW) * CELL + CELL / 2, y: Math.trunc(i / GW) * CELL + CELL / 2 };
+}
 
 const gs = new Int32Array(GW * GH), from = new Int32Array(GW * GH), closed = new Uint8Array(GW * GH);
 const DIRS = [[1, 0, 10], [-1, 0, 10], [0, 1, 10], [0, -1, 10], [1, 1, 14], [1, -1, 14], [-1, 1, 14], [-1, -1, 14]];
 
 /** 回傳拉直後的路徑點 [x0,y0,x1,y1,...]（模擬單位），最後一點是目標 */
-export function findPath(nav: NavGrid, sx: number, sy: number, tx: number, ty: number, ign?: { x: number; y: number; r: number } | null): number[] {
-  const si = nearFree(nav, Math.floor(sx / CELL), Math.floor(sy / CELL));
-  const gi = nearFree(nav, Math.floor(tx / CELL), Math.floor(ty / CELL));
+export function findPath(nav: NavGrid, sx: number, sy: number, tx: number, ty: number, rad: number, ignId = 0): number[] {
+  const si = nearFreeCell(nav, Math.floor(sx / CELL), Math.floor(sy / CELL));
+  const gi = nearFreeCell(nav, Math.floor(tx / CELL), Math.floor(ty / CELL));
   if (si < 0 || gi < 0) return [tx, ty];
   gs.fill(0x3fffffff); from.fill(-1); closed.fill(0);
   const gx = gi % GW, gy = Math.trunc(gi / GW);
@@ -124,16 +152,16 @@ export function findPath(nav: NavGrid, sx: number, sy: number, tx: number, ty: n
   const pts: number[] = [];
   for (let k = cells.length - 2; k >= 0; k -= 2) pts.push(cells[k], cells[k + 1]);
   pts.push(tx, ty);
-  // 拉直：能直線走到的點就略過中間的格子
+  // 拉直：從目前的點一路往前看，看得到的點就跳過，看不到才在上一點轉彎
   const out: number[] = [];
-  let cx = sx, cy = sy, k = 0;
   const n = pts.length / 2;
-  while (k < n) {
-    let j = n - 1;
-    while (j > k && !los(nav, cx, cy, pts[j * 2], pts[j * 2 + 1], j === n - 1 ? ign : null)) j--;
+  let ax = sx, ay = sy, i = 0;
+  while (i < n) {
+    let j = i;
+    while (j + 1 < n && los(nav, ax, ay, pts[(j + 1) * 2], pts[(j + 1) * 2 + 1], rad, j + 1 === n - 1 ? ignId : 0)) j++;
     out.push(pts[j * 2], pts[j * 2 + 1]);
-    cx = pts[j * 2]; cy = pts[j * 2 + 1];
-    k = j + 1;
+    ax = pts[j * 2]; ay = pts[j * 2 + 1];
+    i = j + 1;
   }
   return out;
 }

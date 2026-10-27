@@ -3,7 +3,7 @@ import { Bot } from '../bot/bot';
 import { MAP_H, MAP_W, type TypeId } from '../sim/data';
 import { S as SUB } from '../sim/math';
 import { check, createGame, isB, isCombat, isUnit, type Game } from '../sim/sim';
-import type { Cmd, Ent } from '../sim/types';
+import type { Cmd, Ent, Form } from '../sim/types';
 
 export const W = MAP_W, H = MAP_H;
 export const ME = 0 as const;
@@ -12,6 +12,7 @@ export type Mode =
   | null
   | { k: 'attack' }
   | { k: 'gather' }
+  | { k: 'patrol' }
   | { k: 'place'; type: TypeId; x: number; y: number };
 
 export interface UiEvent { x: number; y: number; text: string; kind: string; t: number }
@@ -32,6 +33,8 @@ export const st = {
   /** 記得的敵方建築（看過但現在看不到） */
   ghosts: new Map<number, { type: TypeId; x: number; y: number; r: number }>(),
   settings: { sound: true, haptic: true },
+  /** 部隊移動的隊形：0 方陣、1 橫列、2 散開 */
+  form: 0 as Form,
 };
 
 export const cam = { x: 650, y: 1800, z: 1 };

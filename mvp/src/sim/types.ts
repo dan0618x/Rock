@@ -1,12 +1,16 @@
 import type { TypeId } from './data';
 
 export type Team = 0 | 1;
+/** 隊形：0 方陣、1 橫列、2 散開 */
+export type Form = 0 | 1 | 2;
 
 export interface BuildJob { type: TypeId; x: number; y: number }
 
 export type Order =
   | { k: 'idle' }
-  | { k: 'move'; x: number; y: number; amove: boolean }
+  | { k: 'move'; x: number; y: number; amove: boolean; best?: number; stall?: number }
+  | { k: 'patrol'; ax: number; ay: number; bx: number; by: number; leg: 0 | 1; best?: number; stall?: number }
+  | { k: 'hold'; x: number; y: number }
   | { k: 'attack'; tid: number; auto: boolean; hx?: number; hy?: number; resume?: Order }
   | { k: 'gather'; res: number; st: 'to' | 'mine' | 'back'; t: number; base: number }
   | { k: 'return'; bid: number; prev: Order | null }
@@ -73,7 +77,9 @@ export interface TeamState {
 }
 
 export type Cmd =
-  | { c: 'move'; ids: number[]; x: number; y: number; amove?: boolean }
+  | { c: 'move'; ids: number[]; x: number; y: number; amove?: boolean; form?: Form }
+  | { c: 'patrol'; ids: number[]; x: number; y: number; form?: Form }
+  | { c: 'hold'; ids: number[] }
   | { c: 'attack'; ids: number[]; tid: number }
   | { c: 'fire'; ids: number[] }
   | { c: 'gather'; ids: number[]; res: number }

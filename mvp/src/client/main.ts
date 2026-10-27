@@ -1,7 +1,7 @@
 import './style.css';
 import { Bot } from '../bot/bot';
 import { TY } from '../sim/data';
-import { visibleAt, step, type TeamCmd } from '../sim/sim';
+import { baseOf, visibleAt, step, type TeamCmd } from '../sim/sim';
 import { clampCam, defZ, stepCam } from './actions';
 import { buzz, sfx, unlockAudio } from './audio';
 import { closePop, drawMini, initHud, measurePad, placePop, pushEvent, refreshAll, refreshCmds, refreshHUD, sizeMinimap, tickMessages, toast } from './hud';
@@ -35,8 +35,9 @@ function startGame() {
   st.started = true;
   for (const s of document.querySelectorAll('.sheet')) (s as HTMLElement).hidden = true;
   cam.z = defZ();
-  cam.x = 640;
-  cam.y = 1780;
+  const B = baseOf(ME);
+  cam.x = B.x + 200;
+  cam.y = B.y - 120;
   clampCam();
   closePop();
   refreshAll(true);

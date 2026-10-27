@@ -36,7 +36,7 @@ const SP = (process.env.OUT || '.');
   console.log('slot1', await p.$eval('#slots .slot >> nth=0', e => e.textContent));
   // 長按圈選：先取消選取，然後在主堡附近按住
   await p.tap('#btnClear');
-  const s = await p.evaluate(() => { const e = window.__rts.st.g.ents.find(e => e.team === 0 && e.type === 'worker'); return window.__rts.w2s(e.x / 16, e.y / 16); });
+  const s = await p.evaluate(() => { const R = window.__rts, e = R.st.g.ents.find(e => e.team === 0 && e.type === 'worker'); R.cam.x = e.x / 16; R.cam.y = e.y / 16; return R.w2s(e.x / 16, e.y / 16); });
   const cdp = await ctx.newCDPSession(p);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: s.x, y: s.y }] });
   await p.waitForTimeout(1200);

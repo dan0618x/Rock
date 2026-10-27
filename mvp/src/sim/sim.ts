@@ -5,8 +5,9 @@ import {
   SCRAP_AMT, START, TIME_LIMIT, TY, UNIT_REQ, VS, type TypeId,
 } from './data';
 import { S, TPS, dist, dist2, idiv, isqrt, px, speedPerTick, ticks } from './math';
-import { CELL, GH, GW, blockedAt, findPath, los, newNav, rebuildNav, type NavGrid } from './nav';
-import type { BuildJob, Cmd, Ent, Order, QItem, SimEvent, Team, TeamState } from './types';
+import { BASE0, BASE1, FIELDS, MAIN_PILES0, TERRAIN, mirror } from './map';
+import { CELL, GH, GW, findPath, insideObstacle, los, nearFree, newNav, rebuildNav, type NavGrid, type Obstacle } from './nav';
+import type { BuildJob, Cmd, Ent, Form, Order, QItem, SimEvent, Team, TeamState } from './types';
 
 export interface Fog { vis: Uint8Array; exp: Uint8Array }
 
@@ -57,22 +58,13 @@ export function spawn(g: Game, type: TypeId, team: Team | -1, xpx: number, ypx: 
   return e;
 }
 
-/** 地圖：兩邊完全點對稱 */
-export const BASE0 = { x: 420, y: 1850 };
-export const BASE1 = { x: MAP_W - 420, y: MAP_H - 1850 };
-/** 擴張點：廢料堆位置與建議主堡位置（隊伍 0 那一側；隊伍 1 取點對稱） */
-export const FIELDS = [
-  { c: [1150, 1700], piles: [[-100, -60], [-110, 30], [-70, 105], [10, 130]], spot: [1250, 1650] },
-  { c: [560, 480], piles: [[-90, 60], [-110, -30], [-60, -105], [30, -120]], spot: [680, 520] },
-];
-const MAIN_PILES = [[-150, -170], [-180, -85], [-190, 0], [-170, 85]];
-const MID = { c: [1700, 1120], piles: [[-95, 0], [95, 0], [0, -95], [0, 95]] };
-export const mirror = (x: number, y: number) => ({ x: MAP_W - x, y: MAP_H - y });
+/** 地圖配置在 map.ts；這裡只提供查詢 */
+export { mirror };
 export const baseOf = (team: Team) => (team === 0 ? BASE0 : BASE1);
-export const fieldSpot = (team: Team, i: number) => {
-  const f = FIELDS[i];
-  return team === 0 ? { x: f.spot[0], y: f.spot[1] } : mirror(f.spot[0], f.spot[1]);
-};
+export const fieldSpot = (team: Team, i: number) => FIELDS[team][i].spot;
+export const FIELD_COUNT = FIELDS[0].length;
+/** 地形（模擬單位），id 用負數，不會跟實體重複 */
+const TERR: Obstacle[] = TERRAIN.map((t, i) => ({ x: px(t.x), y: px(t.y), r: px(t.r), id: -(i + 1) }));
 
 const newTeam = (): TeamState => ({
   scrap: START.scrap * K, gas: START.gas * K, baseLv: 1, exp: 0,
@@ -94,19 +86,15 @@ export function createGame(seed = 1): Game {
     nav: newNav(), fog: [newFog(), newFog()], events: [], hits: [], winner: -1,
   };
   for (const team of [0, 1] as Team[]) {
-    const B = baseOf(team), sg = team === 0 ? 1 : -1;
+    const B = baseOf(team);
     spawn(g, 'base', team, B.x, B.y);
-    for (const [dx, dy] of MAIN_PILES) spawn(g, 'scrap', -1, B.x + dx * sg, B.y + dy * sg);
-    for (const f of FIELDS) for (const [dx, dy] of f.piles) {
-      const p = team === 0 ? { x: f.c[0] + dx, y: f.c[1] + dy } : mirror(f.c[0] + dx, f.c[1] + dy);
-      spawn(g, 'scrap', -1, p.x, p.y);
-    }
+    for (const p0 of MAIN_PILES0) { const p = team === 0 ? p0 : mirror(p0.x, p0.y); spawn(g, 'scrap', -1, p.x, p.y); }
+    for (const f of FIELDS[team]) for (const p of f.piles) spawn(g, 'scrap', -1, p.x, p.y);
   }
-  for (const [dx, dy] of MID.piles) spawn(g, 'scrap', -1, MID.c[0] + dx, MID.c[1] + dy);
   for (const team of [0, 1] as Team[]) {
     const B = baseOf(team), sg = team === 0 ? 1 : -1;
     const ws: Ent[] = [];
-    for (let i = 0; i < START.workers; i++) ws.push(spawn(g, 'worker', team, B.x + sg * (-30 + i * 16), B.y - sg * 100));
+    for (let i = 0; i < START.workers; i++) ws.push(spawn(g, 'worker', team, B.x + sg * (60 + i * 36), B.y - sg * 90));
     for (const w of ws) gatherOne(g, w, nearestRes(g, w), false);
   }
   rebuildNav(g.nav, obstacles(g));
@@ -188,6 +176,10 @@ export function placeCheck(g: Game, team: Team, type: TypeId, xpx: number, ypx: 
     const m = o.r + px(T.r + 10);
     if (dist2(o.x, o.y, x, y) < m * m) return { ok: false, why: '這裡放不下，換個位置' };
   }
+  for (const t of TERRAIN) {
+    const m = t.r + T.r + 10;
+    if ((t.x - xpx) * (t.x - xpx) + (t.y - ypx) * (t.y - ypx) < m * m) return { ok: false, why: '地形擋住了，換個位置' };
+  }
   for (const p of plannedSites(g, team, ignoreWorker)) {
     const m = TY[p.type].r + T.r + 10;
     if ((p.x - xpx) * (p.x - xpx) + (p.y - ypx) * (p.y - ypx) < m * m) return { ok: false, why: '已經有建築預定在這裡' };
@@ -228,7 +220,11 @@ function updateFog(g: Game) {
 }
 
 // ---------- 小工具 ----------
-function obstacles(g: Game) { return g.ents.filter(e => !e.dead && (isB(e) || isRes(e))); }
+function obstacles(g: Game): Obstacle[] {
+  const out: Obstacle[] = TERR.slice();
+  for (const e of g.ents) if (!e.dead && (isB(e) || isRes(e))) out.push({ x: e.x, y: e.y, r: e.r, id: e.id });
+  return out;
+}
 /** 最近的廢料堆；已經有工兵在採的堆會被當成比較遠，工兵自然分散開 */
 export function nearestRes(g: Game, e: { x: number; y: number }): Ent | null {
   const busy = new Map<number, number>();
@@ -293,16 +289,43 @@ function fire(g: Game, e: Ent, t: Ent) {
   const d = Math.max(1, idiv(T.dmg! * HP * pct, 100));
   g.hits.push({ t, d, src: e });
 }
-function damage(g: Game, t: Ent, d: number, src: Ent) {
-  t.hp -= d;
-  if (t.team >= 0 && g.tick - t.hitAt > 2 * TPS) event(g, 'attacked', t.team as Team, t, (TY[t.type].name) + ' 遭受攻擊', t.type);
-  t.hitAt = g.tick;
-  if (t.hp <= 0 && !t.dead) {
-    t.dead = true;
-    if (src.team >= 0) g.teams[src.team as Team].stats.killed++;
+/** 命中結算分三段：先全部扣血、再判定死亡、最後才反擊，雙方完全對稱 */
+function resolveHits(g: Game) {
+  for (const { t, d } of g.hits) {
+    t.hp -= d;
+    if (t.team >= 0 && g.tick - t.hitAt > 2 * TPS) event(g, 'attacked', t.team as Team, t, (TY[t.type].name) + ' 遭受攻擊', t.type);
+    t.hitAt = g.tick;
   }
-  // 被打會自動反擊（待命中的戰鬥單位）
-  if (!t.dead && isCombat(t) && canHit(t, src) && t.order.k === 'idle') t.order = { k: 'attack', tid: src.id, auto: true, hx: t.x, hy: t.y };
+  for (const { t, src } of g.hits) {
+    if (t.hp <= 0 && !t.dead) {
+      t.dead = true;
+      if (src.team >= 0) g.teams[src.team as Team].stats.killed++;
+    }
+  }
+  for (const { t, src } of g.hits) react(g, t, src);
+  g.hits = [];
+}
+function react(g: Game, t: Ent, src: Ent) {
+  if (src.dead || src.team < 0 || t.team < 0) return;
+  // 同伴被打：附近待命的戰鬥單位一起反擊（包括被打的是工兵或建築）
+  const R = px(260);
+  for (const a of g.ents) {
+    if (a === t || a.dead || a.team !== t.team || !isCombat(a) || a.order.k !== 'idle' || !canHit(a, src)) continue;
+    if (Math.abs(a.x - t.x) > R || Math.abs(a.y - t.y) > R || dist2(a.x, a.y, t.x, t.y) > R * R) continue;
+    a.order = { k: 'attack', tid: src.id, auto: true, hx: a.x, hy: a.y };
+  }
+  // 被打會自動反擊：待命中的單位直接反擊；正在自動打建築或打不到自己的目標時，改打攻擊者
+  if (t.dead || !isCombat(t) || !canHit(t, src)) return;
+  const o = t.order;
+  if (o.k === 'idle') t.order = { k: 'attack', tid: src.id, auto: true, hx: t.x, hy: t.y };
+  else if (o.k === 'attack' && o.auto && o.tid !== src.id) {
+    const cur = g.byId.get(o.tid);
+    if (!cur || cur.dead || !threatens(cur, t)) t.order = { ...o, tid: src.id };
+  }
+}
+/** a 會不會打 b（反擊時優先處理會打自己的目標） */
+function threatens(a: Ent, b: Ent) {
+  return (isUnit(a) || a.type === 'turret') && canHit(a, b);
 }
 
 // ---------- 移動 ----------
@@ -350,16 +373,31 @@ function goTo(g: Game, e: Ent, x: number, y: number, spd: number, ign?: Ent | nu
   if (isAir(e)) return moveStraight(e, x, y, spd);
   let nav = e.nav;
   if (!nav || nav.ver !== g.nav.ver || dist2(nav.tx, nav.ty, x, y) > px(40) * px(40)) {
-    const pts = los(g.nav, e.x, e.y, x, y, ign) ? [x, y] : findPath(g.nav, e.x, e.y, x, y, ign);
+    const ig = ign ? ign.id : 0;
+    const pts = los(g.nav, e.x, e.y, x, y, e.r, ig) ? [x, y] : findPath(g.nav, e.x, e.y, x, y, e.r, ig);
     nav = e.nav = { tx: x, ty: y, pts, i: 0, ver: g.nav.ver };
   }
   const n = nav.pts.length / 2, last = nav.i >= n - 1;
   const p = last ? { x, y } : { x: nav.pts[nav.i * 2], y: nav.pts[nav.i * 2 + 1] };
   if (!last && dist2(p.x, p.y, e.x, e.y) < px(14) * px(14)) { nav.i++; return false; }
-  if (last && !ign && blockedAt(g.nav, x, y) && dist2(x, y, e.x, e.y) < sq(CELL * 13 / 10)) { e.nav = null; return true; }
+  // 目的地在障礙裡（例如點到建築上）：走到旁邊就算到了
+  if (last && !ign && insideObstacle(g.nav, x, y, e.r) && dist2(x, y, e.x, e.y) < sq(CELL * 2)) { e.nav = null; return true; }
   const done = steerMove(g, e, p.x, p.y, spd);
   if (done && last) { e.nav = null; return true; }
   return false;
+}
+/** 打完之後回到原本的移動或巡邏，卡住計數重新開始 */
+function resumeOf(o: { resume?: Order }): Order {
+  const r = o.resume;
+  if (r && (r.k === 'move' || r.k === 'patrol')) { r.best = undefined; r.stall = 0; return r; }
+  return r || { k: 'idle' };
+}
+/** 卡住偵測：1.5 秒內都沒有更接近目標，就當作到了（避免擠在一起的單位一直停在「移動中」不開火） */
+function stalled(e: Ent, o: { best?: number; stall?: number }, x: number, y: number) {
+  const d = isqrt(dist2(e.x, e.y, x, y));
+  if (o.best === undefined || d < o.best - px(1)) { o.best = d; o.stall = 0; return false; }
+  o.stall = (o.stall || 0) + 1;
+  return o.stall > 30;
 }
 /** 工兵採集往返：近距離直線走，遠距離才尋路 */
 function walk(g: Game, e: Ent, t: Ent, spd: number) {
@@ -390,12 +428,35 @@ function updUnit(g: Game, e: Ent) {
         const t = acquire(g, e, rng + px(60));
         if (t) { e.order = { k: 'attack', tid: t.id, auto: true, resume: o }; break; }
       }
-      if (goTo(g, e, o.x, o.y, spd)) e.order = { k: 'idle' };
+      if (goTo(g, e, o.x, o.y, spd) || stalled(e, o, o.x, o.y)) { e.order = { k: 'idle' }; e.nav = null; }
+      break;
+    }
+    case 'patrol': {
+      if (isCombat(e)) {
+        const t = acquire(g, e, rng + px(60));
+        if (t) { e.order = { k: 'attack', tid: t.id, auto: true, resume: o }; break; }
+      }
+      const tx = o.leg ? o.bx : o.ax, ty = o.leg ? o.by : o.ay;
+      if (goTo(g, e, tx, ty, spd) || stalled(e, o, tx, ty)) { o.leg = o.leg ? 0 : 1; o.best = undefined; o.stall = 0; e.nav = null; }
+      break;
+    }
+    case 'hold': {
+      // 駐守：不追擊，只打射程內的敵人；被推開就走回原位
+      if (isCombat(e)) {
+        const t = acquire(g, e, rng + px(2));
+        if (t) {
+          const dx = t.px - e.x, dy = t.py - e.y, m = isqrt(dx * dx + dy * dy) || 1;
+          e.fx = idiv(dx * 1024, m); e.fy = idiv(dy * 1024, m);
+          if (e.cd <= 0) fire(g, e, t);
+          break;
+        }
+      }
+      if (dist2(e.x, e.y, o.x, o.y) > sq(px(20))) goTo(g, e, o.x, o.y, spd);
       break;
     }
     case 'attack': {
       const t = g.byId.get(o.tid);
-      if (!t || t.dead || !canSee(g, team, t)) { e.order = o.resume || { k: 'idle' }; e.nav = null; break; }
+      if (!t || t.dead || !canSee(g, team, t)) { e.order = resumeOf(o); e.nav = null; break; }
       const d = isqrt(dist2(e.x, e.y, t.px, t.py)) - t.r;
       if (d > rng) {
         if (o.auto && o.hx !== undefined && dist2(e.x, e.y, o.hx, o.hy!) > px(280) * px(280)) { e.order = { k: 'move', x: o.hx, y: o.hy!, amove: false }; break; }
@@ -563,6 +624,15 @@ function separate(g: Game) {
       u.x = b.x + idiv((dx || 1) * m, d);
       u.y = b.y + idiv(dy * m, d);
     }
+    for (const t of TERR) {
+      const dx = u.x - t.x, dy = u.y - t.y, m = t.r + u.r;
+      if (Math.abs(dx) >= m || Math.abs(dy) >= m) continue;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= m * m) continue;
+      const d = isqrt(d2) || 1;
+      u.x = t.x + idiv((dx || 1) * m, d);
+      u.y = t.y + idiv(dy * m, d);
+    }
     u.x = Math.max(u.r, Math.min(px(MAP_W) - u.r, u.x));
     u.y = Math.max(u.r, Math.min(px(MAP_H) - u.r, u.y));
   }
@@ -590,18 +660,49 @@ const mine = (g: Game, team: Team, ids: number[], f: (e: Ent) => boolean) => {
   return out;
 };
 
-/** 編隊移動的隊形：格子點依離中心距離排序 */
-const FORM: [number, number][] = (() => {
-  const pts: [number, number][] = [];
-  for (let j = -6; j <= 6; j++) for (let i = -6; i <= 6; i++) pts.push([i, j]);
-  pts.sort((a, b) => a[0] * a[0] + a[1] * a[1] - (b[0] * b[0] + b[1] * b[1]) || a[1] - b[1] || a[0] - b[0]);
-  return pts;
-})();
+/**
+ * 隊形：以「隊伍中心 → 目標」為前方，射程短、血厚的排前面，射程長的排後面；
+ * 同一排依目前左右位置分配，避免互相穿過。位置在障礙裡就移到最近的空地。
+ */
+export function formSlots(g: Game, us: Ent[], tx: number, ty: number, form: Form): { e: Ent; x: number; y: number }[] {
+  const n = us.length;
+  if (!n) return [];
+  // 中心不做除法（避免捨入讓兩邊不對稱）：用 n 倍的座標計算方向與左右位置
+  let sx = 0, sy = 0;
+  for (const e of us) { sx += e.x; sy += e.y; }
+  let fx = tx * n - sx, fy = ty * n - sy;
+  const fm = isqrt(fx * fx + fy * fy);
+  if (fm < px(20) * n) { fx = 0; fy = -1024; } else { fx = idiv(fx * 1024, fm); fy = idiv(fy * 1024, fm); }
+  const rx = -fy, ry = fx;
+  let maxR = 0;
+  for (const e of us) maxR = Math.max(maxR, e.r);
+  const sp = idiv((maxR * 2 + px(8)) * (form === 2 ? 18 : 10), 10);
+  const cols = form === 1 ? Math.min(n, 12) : Math.max(1, Math.min(n, isqrt(n * 2 - 1) + 1));
+  const order = us.slice().sort((a, b) => (TY[a.type].range || 0) - (TY[b.type].range || 0) || b.maxHp - a.maxHp || a.id - b.id);
+  const out: { e: Ent; x: number; y: number }[] = [];
+  for (let row = 0; row * cols < n; row++) {
+    const line = order.slice(row * cols, row * cols + cols);
+    line.sort((a, b) => ((a.x * n - sx) * rx + (a.y * n - sy) * ry) - ((b.x * n - sx) * rx + (b.y * n - sy) * ry) || a.id - b.id);
+    const k = line.length;
+    line.forEach((e, col) => {
+      const lat = idiv((2 * col - (k - 1)) * sp, 2), back = row * sp;
+      let x = tx + idiv(rx * lat, 1024) - idiv(fx * back, 1024);
+      let y = ty + idiv(ry * lat, 1024) - idiv(fy * back, 1024);
+      x = Math.max(e.r, Math.min(px(MAP_W) - e.r, x));
+      y = Math.max(e.r, Math.min(px(MAP_H) - e.r, y));
+      if (!isAir(e) && insideObstacle(g.nav, x, y, e.r)) { const f = nearFree(g.nav, x, y); x = f.x; y = f.y; }
+      out.push({ e, x, y });
+    });
+  }
+  return out;
+}
 
 /** 檢查指令；回傳空字串表示可以執行，否則是給玩家看的原因 */
 export function check(g: Game, team: Team, c: Cmd): string {
   switch (c.c) {
     case 'move': return mine(g, team, c.ids, isUnit).length ? '' : '沒有可移動的單位';
+    case 'patrol': return mine(g, team, c.ids, isCombat).length ? '' : '沒有戰鬥單位';
+    case 'hold': return mine(g, team, c.ids, isCombat).length ? '' : '沒有戰鬥單位';
     case 'attack': {
       const t = g.byId.get(c.tid);
       if (!t || t.dead || t.team === team || t.team < 0) return '目標不存在';
@@ -668,15 +769,16 @@ export function apply(g: Game, team: Team, c: Cmd) {
   switch (c.c) {
     case 'move': {
       const us = mine(g, team, c.ids, isUnit);
-      const tx = px(c.x), ty = px(c.y);
-      us.sort((a, b) => dist2(a.x, a.y, tx, ty) - dist2(b.x, b.y, tx, ty) || a.id - b.id);
-      const sp = px(30);
-      us.forEach((e, i) => {
-        const [ox, oy] = FORM[Math.min(i, FORM.length - 1)];
-        const fx = team === 0 ? ox : -ox, fy = team === 0 ? oy : -oy;
-        const x = Math.max(px(10), Math.min(px(MAP_W - 10), tx + fx * sp)), y = Math.max(px(10), Math.min(px(MAP_H - 10), ty + fy * sp));
-        setOrder(g, e, { k: 'move', x, y, amove: !!c.amove });
-      });
+      for (const { e, x, y } of formSlots(g, us, px(c.x), px(c.y), c.form || 0)) setOrder(g, e, { k: 'move', x, y, amove: !!c.amove });
+      break;
+    }
+    case 'patrol': {
+      const us = mine(g, team, c.ids, isCombat);
+      for (const { e, x, y } of formSlots(g, us, px(c.x), px(c.y), c.form || 0)) setOrder(g, e, { k: 'patrol', ax: e.x, ay: e.y, bx: x, by: y, leg: 1 });
+      break;
+    }
+    case 'hold': {
+      for (const e of mine(g, team, c.ids, isCombat)) setOrder(g, e, { k: 'hold', x: e.x, y: e.y });
       break;
     }
     case 'attack': {
@@ -795,8 +897,7 @@ export function step(g: Game, cmds: TeamCmd[] = []) {
     if (isB(e)) updBuilding(g, e);
     else updUnit(g, e);
   }
-  for (const h of g.hits) damage(g, h.t, h.d, h.src);
-  g.hits = [];
+  resolveHits(g);
   separate(g);
   gasTick(g);
   // 清除死亡

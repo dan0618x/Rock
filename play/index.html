@@ -12,8 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Noto+Sans+TC:wght@500;700&display=swap">
-  <script type="module" crossorigin src="./assets/index-DEW8hY-G.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-Cq0V3_59.css">
+  <script type="module" crossorigin src="./assets/index--S9EFPlT.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BPi4rOtY.css">
 </head>
 <body>
 <div id="app">
@@ -78,9 +78,9 @@
       </ul>
       <h2>按鈕</h2>
       <ul>
-        <li><b>左下</b>：建築、工兵、地面、空軍分類，選取後鏡頭跳過去</li>
+        <li><b>左下快捷鍵</b>：點一下直接選取（例如全部兵營、全部空軍），鏡頭跳過去；<b>長按</b>可以換成別的</li>
         <li><b>中下編隊</b>：點空格存入、點一下選取、長按加入、連點兩下管理</li>
-        <li><b>右下</b>：部隊的大圓鈕是「攻擊」，按下就向附近敵人開火；工兵可以建造</li>
+        <li><b>右下部隊指令</b>：「攻」向附近敵人開火；「巡」點一個終點，在兩點之間來回巡邏；「守」原地駐守，只打射程內的敵人；「陣」切換隊形（方陣、橫列、散開），射程短、血厚的一律排前面</li>
         <li><b>右側「事件」</b>：跳到最近發生的事（被攻擊、完成建造）</li>
         <li>生產按鈕<b>長按</b>：循環生產</li>
       </ul>
@@ -89,14 +89,18 @@
         <li><b>廢料</b>：工兵採集，每座主堡最多 8 個工兵採集</li>
         <li><b>輻能氣</b>：蓋抽氣塔，太靠近彼此會互搶產量</li>
         <li><b>人口</b>：開局 10，在主堡「擴建」增加，最多 50</li>
-        <li><b>主堡 Lv2</b>：解鎖空軍基地與火箭兵；重甲兵需要空軍基地</li>
+        <li><b>主堡升級</b>：Lv2 解鎖空軍基地與火箭兵；Lv3 解鎖研究所；Lv4 解鎖俯翼轟炸兵</li>
+        <li><b>兵種解鎖</b>：重甲兵需要空軍基地；機槍車手、重武裝手、立翔榴彈兵需要研究所</li>
+        <li><b>地形</b>：岩石和酸池擋住地面部隊，空軍可以飛過去</li>
         <li>建築要工兵在旁邊才會蓋；工兵離開就暫停，選工兵點它就繼續</li>
       </ul>
       <h2>相剋</h2>
       <ul>
         <li>槍兵便宜、打輕甲強；火箭兵能對空、打重甲與空軍強</li>
-        <li>重甲兵血厚、近戰打步兵強，但不能對空</li>
-        <li>渦輪機翼兵能對地也能對空，怕火箭兵和砲塔</li>
+        <li>重甲兵血厚、近戰打步兵強，但不能對空；機槍車手快、打輕甲強</li>
+        <li>重武裝手射程最遠、能對空，打重甲強但很慢</li>
+        <li>渦輪機翼兵、立翔榴彈兵能對地也能對空；俯翼轟炸兵只打地面、打建築強</li>
+        <li>噴射包兵沒有攻擊力，視野很遠，拿來偵察</li>
       </ul>
       <div class="row2"><span></span><button class="gobtn" data-close="helpSheet">關閉</button></div>
     </div>

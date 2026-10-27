@@ -114,7 +114,23 @@ const ids = (es: Ent[]) => es.map(e => e.id);
 export const marker = (x: number, y: number, c: number, r = 0) => st.fx.push({ x, y, t0: now(), c, r, kind: 'marker' });
 
 export function moveCmd(es: Ent[], w: { x: number; y: number }) {
-  if (send({ c: 'move', ids: ids(es.filter(isUnit)), x: Math.round(w.x), y: Math.round(w.y) })) marker(w.x, w.y, C.ok);
+  if (send({ c: 'move', ids: ids(es.filter(isUnit)), x: Math.round(w.x), y: Math.round(w.y), form: st.form })) marker(w.x, w.y, C.ok);
+}
+const FORM_NAMES = ['方陣', '橫列', '散開'];
+export const formName = () => FORM_NAMES[st.form];
+/** 隊形切換：之後的移動、巡邏都用這個隊形；射程短、血厚的單位一律排前面 */
+export function cycleForm() {
+  st.form = ((st.form + 1) % 3) as 0 | 1 | 2;
+  toast('隊形：' + formName() + '（射程短的排前面）');
+  refreshCmds(true);
+}
+export function patrolMode() { setMode({ k: 'patrol' }, '巡邏：點地圖上的巡邏終點，部隊會在這裡和目前位置之間來回'); }
+export function holdCmd(es: Ent[]) {
+  if (send({ c: 'hold', ids: ids(es.filter(isCombat)) })) {
+    toast('駐守：原地不動，只打射程內的敵人');
+    gesture('<b>駐守</b> → 不追擊');
+    refreshCmds(true);
+  }
 }
 export function attackCmd(es: Ent[], t: Ent) {
   const can = es.filter(e => canHit(e, t));
@@ -267,6 +283,11 @@ function doMode(w: { x: number; y: number }, hit: Ent | null) {
     if (hit && hit.team >= 0 && hit.team !== ME) { attackCmd(k.es, hit); gesture('<b>開火中點敵人</b> → 集火 ' + nm(hit)); return; }
     moveCmd(k.es, w);
     gesture('<b>點地面</b> → 移動（再點攻擊就開火）');
+  } else if (m.k === 'patrol') {
+    if (send({ c: 'patrol', ids: ids(k.es.filter(isCombat)), x: Math.round(w.x), y: Math.round(w.y), form: st.form })) {
+      marker(w.x, w.y, C.accent);
+      gesture('<b>巡邏</b> → 在目前位置與這裡之間來回，遇敵就打');
+    }
   } else if (m.k === 'gather') {
     if (hit && isRes(hit)) { gatherCmd(k.es, hit); gesture('<b>採集</b> → 廢料堆'); }
     else { toast('請點廢料堆', 'bad'); return; }
