@@ -2,7 +2,7 @@
 import { circleSelect, clampCam, handleTap, stopCamAnim } from './actions';
 import { unlockAudio } from './audio';
 import { gesture } from './hud';
-import { s2w } from './render';
+import { K, s2w } from './render';
 import { W, H, cam, now, st, view } from './state';
 
 type G =
@@ -75,7 +75,7 @@ export function initInput(cv: HTMLCanvasElement) {
       cam.z = (G.z0 * Math.hypot(a.x - b.x, a.y - b.y)) / G.d0;
       clampCam();
       cam.x = G.w0.x - (m.x - view.w / 2) / cam.z;
-      cam.y = G.w0.y - (m.y - view.h / 2) / cam.z;
+      cam.y = G.w0.y - (m.y - view.h / 2) / (cam.z * K);
       clampCam();
       stopCamAnim();
     } else if (G.k === 'pend' || G.k === 'pan') {
@@ -86,7 +86,7 @@ export function initInput(cv: HTMLCanvasElement) {
       }
       if (G.k === 'pan') {
         cam.x -= (ev.clientX - G.lx) / cam.z;
-        cam.y -= (ev.clientY - G.ly) / cam.z;
+        cam.y -= (ev.clientY - G.ly) / (cam.z * K);
         clampCam();
         stopCamAnim();
       }
@@ -114,7 +114,7 @@ export function initInput(cv: HTMLCanvasElement) {
     cam.z *= Math.exp(-ev.deltaY * 0.0015);
     clampCam();
     cam.x = w.x - (ev.clientX - view.w / 2) / cam.z;
-    cam.y = w.y - (ev.clientY - view.h / 2) / cam.z;
+    cam.y = w.y - (ev.clientY - view.h / 2) / (cam.z * K);
     clampCam();
   }, { passive: false });
 }

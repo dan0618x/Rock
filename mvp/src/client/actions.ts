@@ -4,7 +4,7 @@ import { S as SUB } from '../sim/math';
 import { canHit, isAir, isB, isCombat, isRes, isUnit, minersOf, placeCheck, visibleAt } from '../sim/sim';
 import type { Cmd, Ent } from '../sim/types';
 import { buzz, sfx } from './audio';
-import { C, inView, s2w, w2s } from './render';
+import { C, K, inView, s2w, screenBody, w2s } from './render';
 import { ME, PAD, W, H, cam, centroid, countBy, ex, ey, issue, now, own, selEnts, selKind, st, view } from './state';
 import { gesture, refreshAll, refreshCmds, toast, closePop } from './hud';
 
@@ -17,7 +17,8 @@ export function clampCam() {
   cam.z = Math.max(defZ(), Math.min(maxZ(), cam.z));
   const z = cam.z;
   const x0 = (view.w / 2 - PAD.l) / z, x1 = W - (view.w / 2 - PAD.r) / z;
-  const y0 = (view.h / 2 - PAD.t) / z, y1 = H - (view.h / 2 - PAD.b) / z;
+  // 斜俯視：地面在垂直方向壓扁成 K 倍，所以垂直方向看得到的地圖範圍比較大
+  const y0 = (view.h / 2 - PAD.t) / (z * K), y1 = H - (view.h / 2 - PAD.b) / (z * K);
   cam.x = x0 > x1 ? (x0 + x1) / 2 : Math.max(x0, Math.min(x1, cam.x));
   cam.y = y0 > y1 ? (y0 + y1) / 2 : Math.max(y0, Math.min(y1, cam.y));
 }
@@ -85,17 +86,19 @@ export function selectAndJump(list: Ent[], key: string, msg: string, keepPop = f
   gesture(msg + jumpTo(list, key));
 }
 /** 點到哪個實體：空軍優先、建築與廢料次之 */
-export function pick(w: { x: number; y: number }): Ent | null {
-  const slack = 16 / cam.z;
+/** 點到哪個實體：用畫面上的身體位置判斷（半 2D 下單位往上長高），空軍優先、建築與廢料次之 */
+export function pick(sx: number, sy: number): Ent | null {
+  const slack = 16;
   let best: Ent | null = null, bs = 1e9;
   const g = st.g;
   for (const e of g.ents) {
     if (e.dead) continue;
     if (e.team !== ME && !isRes(e) && !visible(e)) continue;
-    const yy = isAir(e) ? ey(e) - 6 : ey(e);
-    const d = Math.hypot(w.x - ex(e), w.y - yy) - e.r / SUB;
+    const b = screenBody(e);
+    const d = Math.hypot(sx - b.x, sy - b.y) - b.r;
     if (d > slack) continue;
-    const s = d + (isAir(e) ? -8 : 0) + (isB(e) ? 10 : 0) + (isRes(e) ? 14 : 0);
+    // 同樣點得到時，越靠近鏡頭（畫面越下面）的優先
+    const s = d + (isAir(e) ? -8 : 0) + (isB(e) ? 10 : 0) + (isRes(e) ? 14 : 0) - b.y * 0.01;
     if (s < bs) { bs = s; best = e; }
   }
   return best;
@@ -238,7 +241,7 @@ function setRally(bs: Ent[], p: { x: number; y: number; res?: number }) {
 
 // ---------- 點地圖 ----------
 export function handleTap(sx: number, sy: number) {
-  const w = s2w(sx, sy), hit = pick(w);
+  const w = s2w(sx, sy), hit = pick(sx, sy);
   if (st.mode && st.mode.k !== 'place') {
     if (hit && hit.team === ME) clearMode();
     else { doMode(w, hit); return; }

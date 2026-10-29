@@ -1,12 +1,23 @@
-// 戰場繪製（PixiJS）：只讀模擬狀態，位置在兩個邏輯步之間補間。
+// 戰場繪製（PixiJS）：半 2D 斜俯視。只讀模擬狀態，位置在兩個邏輯步之間補間。
+//
+// 座標：模擬是正上方看的平面 (x, y)。畫面把地面在垂直方向壓扁成 K 倍（鏡頭斜 48 度往下看），
+// 建築與單位則「站」在地面上、往上長高，越下面（越靠近鏡頭）的蓋在越上面。
+//  - 地面圖層（地表、底圈、範圍、迷霧、標記）：容器 y 方向縮放 K，子物件直接用 (x, y)
+//  - 物件圖層（建築、單位、血條、文字）：容器等比縮放，子物件放在 (x, y*K)，再往上畫高度
+// 單位只有四個方向（右下、右上，往左的兩個用左右鏡像）：右下用「斜前方」、右上用「斜後方」。
 import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import { MINE_CAP, PROD, PUMP, TY } from '../sim/data';
+import { MINE_CAP, PROD, PUMP, TY, type TypeId } from '../sim/data';
+import { TERRAIN } from '../sim/map';
 import { S as SUB } from '../sim/math';
 import { GH, GW } from '../sim/nav';
-import { TERRAIN } from '../sim/map';
 import { builderOf, isAir, isB, isRes, minersOf, placeCheck, plannedSites, visibleAt } from '../sim/sim';
 import type { Ent } from '../sim/types';
 import { ME, W, H, cam, st, view, now } from './state';
+
+/** 地面垂直壓縮比（sin 48.6°） */
+export const K = 0.75;
+/** 空軍離地高度（畫面像素，物件座標） */
+const FLY = 34;
 
 export const C = {
   ally: 0x62b4ff, enemy: 0xff6e5c, scrap: 0xc9a172, gas: 0xcfe06a, accent: 0xe3a948,
@@ -15,32 +26,31 @@ export const C = {
 const FONT = '"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';
 
 let app: Application;
-const world = new Container();
+const groundW = new Container(), objW = new Container(), fogW = new Container(), markW = new Container(), overW = new Container();
 const L = {
-  ground: new Sprite(), res: new Container(), under: new Graphics(), bld: new Container(), gnd: new Container(),
-  shots: new Graphics(), airShadow: new Graphics(), air: new Container(), fog: new Sprite(), over: new Graphics(), texts: new Container(),
+  ground: new Sprite(), under: new Graphics(), shadow: new Graphics(), plan: new Graphics(),
+  obj: new Container(), shots: new Graphics(), air: new Container(),
+  fog: new Sprite(), marks: new Graphics(), over: new Graphics(), texts: new Container(),
 };
 const screen = new Graphics();
+/** 放置模式的半透明建築 */
+const placeGhost = new Graphics();
 
-interface View { root: Container; body: Graphics; label: Text; extra?: Graphics; turn?: Container; ghost?: boolean }
+interface View { root: Container; fig: Container; label?: Text; dx: number; front: boolean; key: string; ghost?: boolean }
 
-/**
- * 單位圖（朝上）：ax/ay = 圖中內容最小外接圓的圓心（當旋轉中心），ext = 外接圓半徑 / 圖寬。
- * 整張圖縮到外接圓剛好落在碰撞圓裡面，轉到任何方向都不會超出底圈，單位之間就是圈碰圈。
- */
-const ART: Record<string, { ax: number; ay: number; ext: number }> = {
-  worker: { ax: 0.5, ay: 0.394, ext: 0.396 },
-  rifle: { ax: 0.503, ay: 0.384, ext: 0.379 },
-  srocket: { ax: 0.556, ay: 0.371, ext: 0.371 },
-  heavy: { ax: 0.565, ay: 0.382, ext: 0.456 },
-  turbo: { ax: 0.531, ay: 0.626, ext: 0.544 },
-};
-const tex: Record<string, Texture> = {};
+/** 單位圖（之後生成）：art/units/<兵種>_front.webp（朝右下）與 _back.webp（朝右上）；往左用鏡像 */
+const art: Partial<Record<TypeId, { front: Texture; back: Texture }>> = {};
+/** 建築圖（之後生成）：art/buildings/<建築>.webp，斜前方一張 */
+const bart: Partial<Record<TypeId, Texture>> = {};
 const views = new Map<number, View>();
 const ghostViews = new Map<number, View>();
 const status = new Map<number, Text>();
 
-let fogCanvas: HTMLCanvasElement, fogCtx: CanvasRenderingContext2D, fogImg: ImageData, fogTex: Texture, fogTick = -1;
+let fogCtx: CanvasRenderingContext2D, fogImg: ImageData, fogTex: Texture, fogTick = -1;
+
+async function tryLoad(url: string): Promise<Texture | null> {
+  try { return await Assets.load(url); } catch { return null; }
+}
 
 export async function initRender(canvas: HTMLCanvasElement) {
   app = new Application();
@@ -49,16 +59,30 @@ export async function initRender(canvas: HTMLCanvasElement) {
     resolution: Math.min(2, window.devicePixelRatio || 1), width: window.innerWidth, height: window.innerHeight,
   });
   app.ticker.stop();
-  // 單位圖載不到就照舊畫幾何圖形
-  await Promise.all(Object.keys(ART).map(async k => { try { tex[k] = await Assets.load('art/units/' + k + '.webp'); } catch { /* 沿用幾何圖形 */ } }));
-  app.stage.addChild(world, screen);
-  world.addChild(L.ground, L.res, L.under, L.bld, L.gnd, L.shots, L.airShadow, L.air, L.fog, L.over, L.texts);
+  // 有圖就用圖，沒有就畫佔位圖形
+  const units: TypeId[] = ['worker', 'rifle', 'srocket', 'heavy', 'biker', 'walker', 'jetpack', 'turbo', 'glider', 'divebomber'];
+  const blds: TypeId[] = ['base', 'barracks', 'airbase', 'lab', 'turret', 'pump'];
+  await Promise.all([
+    ...units.map(async t => {
+      const [f, b] = await Promise.all([tryLoad('art/units/' + t + '_front.webp'), tryLoad('art/units/' + t + '_back.webp')]);
+      if (f && b) art[t] = { front: f, back: b };
+    }),
+    ...blds.map(async t => { const x = await tryLoad('art/buildings/' + t + '.webp'); if (x) bart[t] = x; }),
+  ]);
+  L.obj.sortableChildren = true;
+  L.air.sortableChildren = true;
+  groundW.addChild(L.ground, L.under, L.shadow, L.plan);
+  objW.addChild(L.obj, L.shots, L.air);
+  fogW.addChild(L.fog);
+  markW.addChild(L.marks);
+  overW.addChild(L.over, placeGhost, L.texts);
+  app.stage.addChild(groundW, objW, fogW, markW, overW, screen);
   drawGround();
-  fogCanvas = document.createElement('canvas');
-  fogCanvas.width = GW; fogCanvas.height = GH;
-  fogCtx = fogCanvas.getContext('2d')!;
+  const fc = document.createElement('canvas');
+  fc.width = GW; fc.height = GH;
+  fogCtx = fc.getContext('2d')!;
   fogImg = fogCtx.createImageData(GW, GH);
-  fogTex = Texture.from(fogCanvas);
+  fogTex = Texture.from(fc);
   L.fog.texture = fogTex;
   L.fog.width = GW * 40; L.fog.height = GH * 40;
 }
@@ -99,7 +123,10 @@ function drawGround() {
   L.ground.height = H;
 }
 
-/** 地形：岩脊用幾個錯開的圓疊出不規則的岩塊；酸池是暗綠色、邊緣發光 */
+/**
+ * 地形畫在地面貼圖上（之後整張會被壓扁成 K 倍）。
+ * 岩石做出高度：先畫往下偏移的暗色側面，再畫亮色頂面；酸池是暗綠色、邊緣發光。
+ */
 function drawTerrain(c: CanvasRenderingContext2D) {
   let sd = 11;
   const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
@@ -111,31 +138,20 @@ function drawTerrain(c: CanvasRenderingContext2D) {
     c.beginPath(); c.arc(t.x, t.y, t.r * 1.15, 0, 7); c.fill();
   }
   const rocks = TERRAIN.filter(t => t.kind === 'rock');
-  // 先畫陰影，再畫岩塊，最後畫亮面
+  const lift = 30 / K; // 岩石高約 30 像素
   c.fillStyle = 'rgba(0,0,0,.35)';
-  for (const t of rocks) { c.beginPath(); c.arc(t.x + 10, t.y + 14, t.r * 1.02, 0, 7); c.fill(); }
+  for (const t of rocks) { c.beginPath(); c.arc(t.x + 8, t.y + 10, t.r * 1.02, 0, 7); c.fill(); }
+  c.fillStyle = '#2e2a23';
+  for (const t of rocks) { c.beginPath(); c.arc(t.x, t.y, t.r, 0, 7); c.fill(); }
   for (const t of rocks) {
     for (let i = 0; i < 4; i++) {
       const a = rnd() * 6.28, d = t.r * 0.25 * rnd(), rr = t.r * (0.72 + rnd() * 0.3);
       c.fillStyle = i % 2 ? '#4b4438' : '#575043';
-      c.beginPath(); c.arc(t.x + Math.cos(a) * d, t.y + Math.sin(a) * d, rr, 0, 7); c.fill();
+      c.beginPath(); c.arc(t.x + Math.cos(a) * d, t.y - lift + Math.sin(a) * d, rr, 0, 7); c.fill();
     }
   }
   c.fillStyle = 'rgba(236,226,196,.10)';
-  for (const t of rocks) { c.beginPath(); c.arc(t.x - t.r * 0.25, t.y - t.r * 0.3, t.r * 0.45, 0, 7); c.fill(); }
-}
-
-/** 建築外形：圓角方塊，角落不超出碰撞圓太多，相鄰建築看起來不會重疊 */
-const bldShape = (g: Graphics, x: number, y: number, r: number) => { const h = r * 0.86; return g.roundRect(x - h, y - h, h * 2, h * 2, r * 0.3); };
-
-/** 單位圖放進一個會轉向的容器；圖朝上，容器的 0 度朝右，所以圖先轉 90 度 */
-function artTurn(type: string, r: number) {
-  const a = ART[type], sp = new Sprite(tex[type]), turn = new Container();
-  sp.anchor.set(a.ax, a.ay);
-  sp.width = sp.height = (r * 0.96) / a.ext;
-  sp.rotation = Math.PI / 2;
-  turn.addChild(sp);
-  return turn;
+  for (const t of rocks) { c.beginPath(); c.arc(t.x - t.r * 0.25, t.y - lift - t.r * 0.3, t.r * 0.45, 0, 7); c.fill(); }
 }
 
 const mkLabel = (ch: string, size: number, color: number) => {
@@ -145,58 +161,143 @@ const mkLabel = (ch: string, size: number, color: number) => {
   return t;
 };
 
-function makeView(e: Ent, ghost = false): View {
+// ---------- 尺寸 ----------
+/** 建築：佔地半寬、牆高 */
+const bldHs = (r: number) => r * 0.86;
+const bldH = (type: TypeId, r: number) => r * (type === 'base' ? 0.95 : type === 'turret' || type === 'pump' ? 1.1 : 0.7);
+/** 單位：身高（腳到頭頂） */
+const unitH = (type: TypeId, r: number) => r * (type === 'heavy' || type === 'walker' ? 2.0 : type === 'biker' ? 1.5 : 2.2);
+/** 實體在物件座標中的畫面中心與頂端（點選、血條、彈道用） */
+function bodyOf(type: TypeId, r: number, ox: number, oy: number) {
+  if (TY[type].cat === 'building') { const hs = bldHs(r), h = bldH(type, r); return { cx: ox, cy: oy - h / 2, top: oy - hs * K - h, r: hs }; }
+  if (TY[type].cat === 'res') return { cx: ox, cy: oy - 6, top: oy - 16, r };
+  if (TY[type].cat === 'air') return { cx: ox, cy: oy - FLY, top: oy - FLY - r, r };
+  const h = unitH(type, r);
+  return { cx: ox, cy: oy - h * 0.5, top: oy - h, r: Math.max(r, h * 0.45) };
+}
+
+// ---------- 佔位圖形（還沒有正式美術時） ----------
+/** 半 2D 建築：亮色頂面 + 暗色正面，隊伍色描邊 */
+function drawBuilding(g: Graphics, type: TypeId, r: number, col: number, alpha = 1) {
+  const hs = bldHs(r), h = bldH(type, r), d = hs * K;
+  g.clear();
+  // 正面：牆、接縫、門
+  g.rect(-hs, d - h, hs * 2, h).fill({ color: 0x3a3a30, alpha }).stroke({ width: 2, color: col, alpha: alpha * 0.8 });
+  for (let i = 1; i < 4; i++) g.moveTo(-hs + (hs * 2 * i) / 4, d - h).lineTo(-hs + (hs * 2 * i) / 4, d).stroke({ width: 1, color: 0x26261f, alpha });
+  g.rect(-hs * 0.22, d - h * 0.62, hs * 0.44, h * 0.62).fill({ color: 0x1b1c17, alpha });
+  g.rect(-hs, d - h, hs * 2, Math.max(3, h * 0.12)).fill({ color: 0xc8a13a, alpha: 0.55 * alpha });
+  g.roundRect(-hs, -d - h, hs * 2, d * 2, r * 0.12).fill({ color: 0x4a4c40, alpha }).stroke({ width: 2.5, color: col, alpha });
+  g.roundRect(-hs * 0.8, -d * 0.8 - h, hs * 1.6, d * 1.6, r * 0.1).fill({ color: 0x55574a, alpha });
+  if (type === 'turret') g.rect(-2, -d - h - r * 0.9, 4, r * 0.9).fill({ color: 0x8a8577, alpha });
+  if (type === 'pump') g.circle(0, -h, hs * 0.45).fill({ color: C.gas, alpha: 0.45 * alpha });
+}
+/** 半 2D 單位：身體、頭、武器；dx = 1 朝右、-1 朝左；front = 朝鏡頭（斜前方） */
+function drawFigure(g: Graphics, type: TypeId, r: number, col: number, dx: number, front: boolean) {
+  const h = unitH(type, r), w = r * (type === 'heavy' || type === 'walker' ? 1.5 : 1.0);
+  const metal = 0x5a5446, dark = 0x2a2822, skin = 0x8a7a66;
+  g.clear();
+  // 腿
+  if (type === 'biker') {
+    g.ellipse(-r * 0.6 * dx, -r * 0.25, r * 0.35, r * 0.25).fill(dark);
+    g.ellipse(r * 0.6 * dx, -r * 0.25, r * 0.35, r * 0.25).fill(dark);
+    g.roundRect(-r * 0.75, -r * 0.6, r * 1.5, r * 0.35, 3).fill(metal);
+  } else {
+    g.rect(-w * 0.35, -h * 0.32, w * 0.25, h * 0.32).fill(dark);
+    g.rect(w * 0.1, -h * 0.32, w * 0.25, h * 0.32).fill(dark);
+  }
+  // 身體（隊伍色胸帶）
+  const by = -h * 0.75, bh = h * 0.45;
+  g.roundRect(-w / 2, by, w, bh, w * 0.2).fill(metal).stroke({ width: 1.5, color: 0x1a1a16 });
+  g.rect(-w / 2, by + bh * 0.35, w, bh * 0.18).fill(col);
+  if (!front) g.roundRect(-w * 0.32, by + bh * 0.1, w * 0.64, bh * 0.6, 3).fill(0x4a4336); // 背包
+  // 頭
+  const hr = r * (type === 'heavy' || type === 'walker' ? 0.38 : 0.42);
+  g.circle(0, by - hr * 0.6, hr).fill(0x6b6352).stroke({ width: 1.2, color: 0x1a1a16 });
+  if (front) g.rect(-hr * 0.15 + hr * 0.35 * dx, by - hr * 0.75, hr * 0.7 * dx, hr * 0.3).fill(skin); // 面罩
+  // 武器：朝面向那一側伸出；斜前方往下一點、斜後方往上一點
+  const wy = by + bh * (front ? 0.45 : 0.2), tilt = front ? r * 0.25 : -r * 0.25;
+  const arm = (len: number, thick: number, color: number) => {
+    g.moveTo(w * 0.25 * dx, wy).lineTo((w * 0.25 + len) * dx, wy + tilt).stroke({ width: thick, color, cap: 'round' });
+  };
+  switch (type) {
+    case 'worker': arm(r * 1.0, 3, 0x8a7a55); g.circle((w * 0.25 + r * 1.0) * dx, wy + tilt, r * 0.28).stroke({ width: 2.5, color: 0x8a7a55 }); break;
+    case 'rifle': arm(r * 1.3, 2.5, 0x3a3a34); break;
+    case 'srocket': g.moveTo(-w * 0.4 * dx, by + bh * 0.05).lineTo((w * 0.3 + r * 1.2) * dx, by + bh * 0.05 + tilt * 0.6).stroke({ width: r * 0.42, color: 0x5d6a4a, cap: 'round' }); break;
+    case 'heavy': arm(r * 0.7, r * 0.45, 0x6e6658); break;
+    case 'biker': arm(r * 0.9, 3, 0x3a3a34); break;
+    case 'walker': g.roundRect(-w * 0.45, by - hr * 1.6, w * 0.9, hr * 1.1, 3).fill(0x5d6a4a); arm(r * 0.6, r * 0.3, 0x5d6a4a); break;
+  }
+}
+/** 空軍佔位：張開的機翼，鼻子朝面向那一側 */
+function drawWing(g: Graphics, type: TypeId, r: number, col: number, dx: number, front: boolean) {
+  const span = r * (type === 'jetpack' ? 0.9 : 1.3), ny = front ? r * 0.3 : -r * 0.3;
+  g.clear();
+  g.poly([r * 1.1 * dx, ny, -r * 0.7 * dx, -span * K, -r * 0.35 * dx, 0, -r * 0.7 * dx, span * K]).fill(0x4f4a3e).stroke({ width: 2, color: col });
+  g.circle(0, 0, r * 0.32).fill(0x6b6352);
+}
+
+function makeView(e: { type: TypeId; team: number; r: number }, ghost = false): View {
   const T = TY[e.type], r = e.r / SUB;
-  const root = new Container(), body = new Graphics();
   const col = e.team === ME ? C.ally : C.enemy;
-  let label: Text;
-  if (isRes(e)) {
-    for (const [ox, oy, s, c] of [[-9, 4, 12, 0x8f7556], [6, -5, 13, C.scrap], [4, 8, 9, 0xa88a63], [-3, -9, 8, 0x7a6550]])
-      body.poly([ox - s, oy, ox - s * 0.3, oy - s * 0.8, ox + s, oy - s * 0.3, ox + s * 0.6, oy + s * 0.6]).fill(c);
-    label = mkLabel('', 10, 0);
-    root.addChild(body);
-    L.res.addChild(root);
-    return { root, body, label };
+  const root = new Container(), fig = new Container();
+  root.addChild(fig);
+  const v: View = { root, fig, dx: e.team === ME ? 1 : -1, front: e.team === ME ? false : true, key: '', ghost };
+  if (T.cat === 'res') {
+    const g = new Graphics();
+    for (const [ox, oy, s, c] of [[-9, 0, 12, 0x8f7556], [6, -6, 13, C.scrap], [4, 3, 9, 0xa88a63], [-3, -12, 8, 0x7a6550]])
+      g.poly([ox - s, oy, ox - s * 0.3, oy - s * 0.9, ox + s, oy - s * 0.4, ox + s * 0.6, oy + s * 0.4]).fill(c);
+    fig.addChild(g);
+    L.obj.addChild(root);
+    return v;
   }
-  if (isB(e)) {
-    bldShape(body, 0, 0, r).fill(0x22261e).stroke({ width: 3, color: col });
-    label = mkLabel(T.ch, r * 0.85, col);
-    root.addChild(body, label);
+  if (T.cat === 'building') {
+    if (bart[e.type]) {
+      const sp = new Sprite(bart[e.type]);
+      sp.anchor.set(0.5, 0.8);
+      sp.width = bldHs(r) * 2.3; sp.scale.y = sp.scale.x;
+      fig.addChild(sp);
+    } else {
+      const g = new Graphics();
+      drawBuilding(g, e.type, r, col);
+      fig.addChild(g);
+      const lab = mkLabel(T.ch, r * 0.7, col);
+      lab.y = -bldH(e.type, r);
+      fig.addChild(lab);
+    }
     if (ghost) root.alpha = 0.45;
-    L.bld.addChild(root);
-    return { root, body, label, ghost };
+    L.obj.addChild(root);
+    return v;
   }
-  if (tex[e.type] && !ghost) {
-    // 隊伍色只畫在底圈（就是碰撞圓），圖本身是中性色、畫在圈裡面
-    body.circle(0, 0, r).fill({ color: col, alpha: 0.22 }).stroke({ width: 2, color: col });
-    const turn = artTurn(e.type, r);
-    label = mkLabel('', 10, 0);
-    const extra = new Graphics();
-    extra.circle(r * 0.7, -r * 0.7, 4).fill(C.scrap);
-    extra.visible = false;
-    root.addChild(body, turn, extra);
-    (isAir(e) ? L.air : L.gnd).addChild(root);
-    return { root, body, label, extra, turn };
+  if (!art[e.type]) {
+    v.label = mkLabel(T.ch, r * 0.6, C.fg);
+    root.addChild(v.label);
   }
-  if (isAir(e)) {
-    // 還沒有圖的空軍：底圈 + 圈內的機翼三角形
-    const turn = new Container(), wing = new Graphics();
-    body.circle(0, 0, r).fill({ color: col, alpha: 0.22 }).stroke({ width: 2, color: col });
-    wing.poly([r * 0.9, 0, -r * 0.62, r * 0.68, -r * 0.25, 0, -r * 0.62, -r * 0.68]).fill(C.dark).stroke({ width: 1.5, color: col });
-    turn.addChild(wing);
-    label = mkLabel(T.ch, r * 0.75, C.fg);
-    root.addChild(body, turn, label);
-    L.air.addChild(root);
-    return { root, body, label, turn };
+  (T.cat === 'air' ? L.air : L.obj).addChild(root);
+  return v;
+}
+
+/** 依面向換圖：四個方向，有一點遲滯避免直上直下時左右亂跳 */
+function updateFacing(v: View, e: Ent, r: number, col: number) {
+  if (Math.abs(e.fx) > 300) v.dx = e.fx > 0 ? 1 : -1;
+  if (Math.abs(e.fy) > 300) v.front = e.fy > 0;
+  const key = v.dx + (v.front ? 'f' : 'b');
+  if (key === v.key) return;
+  v.key = key;
+  v.fig.removeChildren().forEach(c => c.destroy());
+  const a = art[e.type];
+  if (a) {
+    const sp = new Sprite(v.front ? a.front : a.back);
+    sp.anchor.set(0.5, 0.92);
+    sp.height = unitH(e.type, r) * 1.15;
+    sp.scale.x = Math.abs(sp.scale.y) * v.dx;
+    v.fig.addChild(sp);
+    return;
   }
-  body.circle(0, 0, r).fill(C.dark).stroke({ width: 2.5, color: col });
-  label = mkLabel(T.ch, r * 1.05, col);
-  const extra = new Graphics();
-  extra.circle(r * 0.7, -r * 0.7, 4).fill(C.scrap);
-  extra.visible = false;
-  root.addChild(body, label, extra);
-  L.gnd.addChild(root);
-  return { root, body, label, extra };
+  const g = new Graphics();
+  if (isAir(e)) drawWing(g, e.type, r, col, v.dx, v.front);
+  else drawFigure(g, e.type, r, col, v.dx, v.front);
+  v.fig.addChild(g);
+  if (v.label) v.label.y = isAir(e) ? 0 : -unitH(e.type, r) * 0.55;
 }
 
 function setStatus(id: number, text: string, x: number, y: number, color: number, size = 12) {
@@ -232,39 +333,52 @@ function updateGhosts() {
   }
 }
 
+// ---------- 座標換算（地面點 ↔ 螢幕） ----------
+export const w2s = (x: number, y: number) => ({ x: (x - cam.x) * cam.z + view.w / 2, y: (y - cam.y) * cam.z * K + view.h / 2 });
+export const s2w = (sx: number, sy: number) => ({ x: (sx - view.w / 2) / cam.z + cam.x, y: (sy - view.h / 2) / (cam.z * K) + cam.y });
 export function inView(xpx: number, ypx: number) {
   const p = w2s(xpx, ypx);
   return p.x >= 0 && p.y >= 0 && p.x <= view.w && p.y <= view.h;
 }
-export const w2s = (x: number, y: number) => ({ x: (x - cam.x) * cam.z + view.w / 2, y: (y - cam.y) * cam.z + view.h / 2 });
-export const s2w = (sx: number, sy: number) => ({ x: (sx - view.w / 2) / cam.z + cam.x, y: (sy - view.h / 2) / cam.z + cam.y });
+/** 實體在螢幕上的身體中心與點選半徑（不是腳底） */
+export function screenBody(e: Ent) {
+  const b = bodyOf(e.type, e.r / SUB, e.x / SUB, (e.y / SUB) * K);
+  return { x: (b.cx - cam.x) * cam.z + view.w / 2, y: (b.cy - cam.y * K) * cam.z + view.h / 2, r: b.r * cam.z };
+}
 
 export function draw(alpha: number, circle: { sx: number; sy: number; r: number } | null) {
-  const g = st.g;
-  world.scale.set(cam.z);
-  world.position.set(view.w / 2 - cam.x * cam.z, view.h / 2 - cam.y * cam.z);
+  const g = st.g, z = cam.z;
+  const px0 = view.w / 2 - cam.x * z, py0 = view.h / 2 - cam.y * z * K;
+  for (const c of [groundW, fogW, markW]) { c.scale.set(z, z * K); c.position.set(px0, py0); }
+  for (const c of [objW, overW]) { c.scale.set(z); c.position.set(px0, py0); }
   updateFog();
   updateGhosts();
   const ip = (e: Ent) => ({ x: (e.px + (e.x - e.px) * alpha) / SUB, y: (e.py + (e.y - e.py) * alpha) / SUB });
   const seen = new Set<number>();
-  const under = L.under.clear(), over = L.over.clear(), shots = L.shots.clear(), shadow = L.airShadow.clear();
+  const under = L.under.clear(), shadow = L.shadow.clear(), plan = L.plan.clear(), over = L.over.clear(), shots = L.shots.clear(), marks = L.marks.clear();
   const t = now();
-  // 實體
   for (const e of g.ents) {
     const vis = e.team === ME || isRes(e) || visibleAt(g, ME, e.x, e.y);
     if (!vis) continue;
     seen.add(e.id);
     let v = views.get(e.id);
     if (!v) { v = makeView(e); views.set(e.id, v); }
-    const p = ip(e), r = e.r / SUB;
-    v.root.x = p.x; v.root.y = p.y;
-    if (isRes(e)) { v.root.alpha = 0.5 + (0.5 * e.amt) / 1500; continue; }
+    const p = ip(e), r = e.r / SUB, ox = p.x, oy = p.y * K;
+    const col = e.team === ME ? C.ally : C.enemy;
+    const b = bodyOf(e.type, r, ox, oy);
+    v.root.x = ox; v.root.y = oy;
+    if (isRes(e)) { v.root.zIndex = oy; v.root.alpha = 0.5 + (0.5 * e.amt) / 1500; continue; }
     if (isB(e)) {
+      v.root.zIndex = oy + bldHs(r) * K;
       v.root.alpha = e.built ? 1 : 0.55;
+      shadow.ellipse(p.x + r * 0.15, p.y + r * 0.25, bldHs(r) * 1.15, bldHs(r) * 1.1).fill({ color: 0x000000, alpha: 0.28 });
+      const below = oy + bldHs(r) * K + 12;
       if (!e.built) {
         const paused = e.team === ME && !builderOf(g, e);
-        over.arc(p.x, p.y, r + 8, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * e.prog) / (TY[e.type].bt! * 20)).stroke({ width: 4, color: paused ? C.dim : C.accent });
-        setStatus(e.id, paused ? '暫停' : '', p.x, p.y - r - 14, C.dim);
+        const bw = r * 1.6, f = e.prog / (TY[e.type].bt! * 20);
+        over.rect(ox - bw / 2, b.top - 12, bw, 5).fill({ color: 0x000000, alpha: 0.6 });
+        over.rect(ox - bw / 2, b.top - 12, bw * f, 5).fill(paused ? C.dim : C.accent);
+        setStatus(e.id, paused ? '暫停' : '', ox, b.top - 24, C.dim);
       } else if (e.team === ME) {
         let s = '';
         const q = e.q[0];
@@ -272,44 +386,44 @@ export function draw(alpha: number, circle: { sx: number; sy: number; r: number 
         if (q) {
           const name = q.kind === 'unit' ? TY[q.type!].ch : q.kind === 'upg' ? '升級' : '擴建';
           s = (s ? s + '\n' : '') + name + (e.q.length > 1 ? ' +' + (e.q.length - 1) : '') + (e.loop ? ' ∞' : '');
-          const bw = r * 1.6, by = p.y + r + 8;
-          over.rect(p.x - bw / 2, by, bw, 5).fill({ color: 0x000000, alpha: 0.6 });
-          over.rect(p.x - bw / 2, by, (bw * q.t) / q.total, 5).fill(C.accent);
+          const bw = r * 1.6;
+          over.rect(ox - bw / 2, below - 6, bw, 5).fill({ color: 0x000000, alpha: 0.6 });
+          over.rect(ox - bw / 2, below - 6, (bw * q.t) / q.total, 5).fill(C.accent);
         } else if (e.loop) s = (s ? s + '\n' : '') + '∞ ' + TY[e.loop].name;
         if (e.type === 'pump') s = '+' + (e.rate / 1000).toFixed(1) + '/s';
-        setStatus(e.id, s, p.x, p.y + r + (q ? 26 : 14), e.type === 'pump' ? C.gas : C.dim, 11);
+        setStatus(e.id, s, ox, below + (q ? 12 : 4), e.type === 'pump' ? C.gas : C.dim, 11);
       } else setStatus(e.id, '', 0, 0, 0);
     } else {
-      if (isAir(e)) {
-        v.root.y = p.y - 6;
-        shadow.ellipse(p.x + 6, p.y + 14, r * 0.9, r * 0.45).fill({ color: 0x000000, alpha: 0.3 });
-      } else if (v.extra) v.extra.visible = e.carry > 0;
-      if (v.turn) v.turn.rotation = turnToward(v.turn.rotation, Math.atan2(e.fy, e.fx));
-      v.body.alpha = 1;
+      updateFacing(v, e, r, col);
+      // 底圈（隊伍色）與影子畫在地面上
+      shadow.ellipse(p.x + 3, p.y + 3, r * 0.95, r * 0.95).fill({ color: 0x000000, alpha: 0.3 });
+      under.circle(p.x, p.y, r).fill({ color: col, alpha: 0.2 }).stroke({ width: 2 / K, color: col, alpha: 0.9 });
+      if (isAir(e)) { v.root.y = oy - FLY; v.root.zIndex = oy; }
+      else {
+        v.root.zIndex = oy;
+        // 工兵帶廢料：背上一小塊
+        if (e.carry > 0) over.circle(ox - 6 * v.dx, b.cy - 2, 4).fill(C.scrap);
+      }
     }
-    // 彈道
+    // 彈道：從槍口高度打到目標身體
     if (g.tick - e.shotAt <= 2) {
       const tg = g.byId.get(e.shotTid);
       if (tg) {
-        const q = ip(tg);
+        const q = ip(tg), tb = bodyOf(tg.type, tg.r / SUB, q.x, q.y * K);
         const a = 1 - (g.tick - e.shotAt + alpha) / 3;
-        const heavy = e.type === 'srocket' || e.type === 'heavy';
-        shots.moveTo(p.x, p.y - (isAir(e) ? 6 : 0)).lineTo(q.x, q.y - (isAir(tg) ? 6 : 0)).stroke({ width: heavy ? 3 : 1.5, color: e.team === ME ? C.ally : C.enemy, alpha: Math.max(0, a) });
+        const heavy = e.type === 'srocket' || e.type === 'heavy' || e.type === 'walker' || e.type === 'glider' || e.type === 'divebomber';
+        shots.moveTo(b.cx, isB(e) ? b.top : b.cy - 2).lineTo(tb.cx, tb.cy).stroke({ width: heavy ? 3 : 1.5, color: e.team === ME ? C.ally : C.enemy, alpha: Math.max(0, a) });
       }
     }
-    // 選取圈與血條
     const sel = st.sel.has(e.id);
-    if (sel) {
-      const oy = isB(e) ? 0 : r * 0.5 + (isAir(e) ? 10 : 0);
-      under.ellipse(p.x, p.y + oy, r + 5, (r + 5) * (isB(e) ? 1 : 0.55)).stroke({ width: 2, color: C.ok });
-    }
+    if (sel) under.circle(p.x, p.y, isB(e) ? bldHs(r) * 1.25 : r + 5).stroke({ width: 2.5 / K, color: C.ok });
     if (sel || e.hp < e.maxHp) {
-      const w = r * 2, f = Math.max(0, e.hp / e.maxHp), oy = isAir(e) ? 6 : 0;
-      over.rect(p.x - w / 2, p.y - r - 12 - oy, w, 5).fill({ color: 0x000000, alpha: 0.6 });
-      over.rect(p.x - w / 2, p.y - r - 12 - oy, w * f, 5).fill(f > 0.5 ? C.ok : f > 0.25 ? C.accent : C.bad);
+      const w = Math.max(r * 2, 24), f = Math.max(0, e.hp / e.maxHp), y = b.top - 9;
+      over.rect(ox - w / 2, y, w, 5).fill({ color: 0x000000, alpha: 0.6 });
+      over.rect(ox - w / 2, y, w * f, 5).fill(f > 0.5 ? C.ok : f > 0.25 ? C.accent : C.bad);
     }
     if (sel && isB(e)) {
-      if (e.type === 'turret') under.circle(p.x, p.y, TY.turret.range!).stroke({ width: 1.5, color: C.ally, alpha: 0.25 });
+      if (e.type === 'turret') under.circle(p.x, p.y, TY.turret.range!).stroke({ width: 1.5 / K, color: C.ally, alpha: 0.3 });
       if (e.rally && PROD[e.type]) {
         const rx = e.rally.x / SUB, ry = e.rally.y / SUB;
         dashed(under, p.x, p.y, rx, ry, C.accent, 2);
@@ -321,8 +435,8 @@ export function draw(alpha: number, circle: { sx: number; sy: number; r: number 
   for (const [id, gh] of st.ghosts) {
     if (seen.has(id)) { const v = ghostViews.get(id); if (v) { v.root.destroy({ children: true }); ghostViews.delete(id); } continue; }
     let v = ghostViews.get(id);
-    if (!v) { v = makeView({ type: gh.type, team: 1, r: gh.r } as Ent, true); ghostViews.set(id, v); }
-    v.root.x = gh.x / SUB; v.root.y = gh.y / SUB;
+    if (!v) { v = makeView({ type: gh.type, team: 1, r: gh.r }, true); ghostViews.set(id, v); }
+    v.root.x = gh.x / SUB; v.root.y = (gh.y / SUB) * K; v.root.zIndex = v.root.y + bldHs(gh.r / SUB) * K;
   }
   for (const [id, v] of ghostViews) if (!st.ghosts.has(id)) { v.root.destroy({ children: true }); ghostViews.delete(id); }
   for (const [id, v] of views) if (!seen.has(id)) { v.root.destroy({ children: true }); views.delete(id); }
@@ -334,43 +448,39 @@ export function draw(alpha: number, circle: { sx: number; sy: number; r: number 
   // 抽氣塔範圍
   const placing = st.mode && st.mode.k === 'place' ? st.mode : null;
   const showPump = (placing && placing.type === 'pump') || [...st.sel].some(id => g.byId.get(id)?.type === 'pump');
-  if (showPump) for (const b of g.ents) if (b.team === ME && b.type === 'pump') under.circle(b.x / SUB, b.y / SUB, PUMP.radius).stroke({ width: 1.5, color: C.gas, alpha: 0.35 });
-  // 已確認、還沒開工的建築：灰色預覽
+  if (showPump) for (const b of g.ents) if (b.team === ME && b.type === 'pump') under.circle(b.x / SUB, b.y / SUB, PUMP.radius).stroke({ width: 1.5 / K, color: C.gas, alpha: 0.4 });
+  // 已確認、還沒開工的建築：地面上的灰色預定地
   for (const p of plannedSites(g, ME)) {
-    const r = TY[p.type].r;
-    bldShape(over, p.x, p.y, r).fill({ color: 0x8a8a8a, alpha: 0.3 }).stroke({ width: 2, color: 0x9a9a9a, alpha: 0.8 });
+    const hs = bldHs(TY[p.type].r);
+    plan.roundRect(p.x - hs, p.y - hs, hs * 2, hs * 2, hs * 0.2).fill({ color: 0x8a8a8a, alpha: 0.3 }).stroke({ width: 2 / K, color: 0x9a9a9a, alpha: 0.8 });
   }
-  // 放置中的半透明建築
+  // 放置中的建築：地面預定地 + 半透明的建築
   if (placing) {
-    const T = TY[placing.type], r = T.r;
+    const T = TY[placing.type], r = T.r, hs = bldHs(r);
     const ck = placeCheck(g, ME, placing.type, Math.round(placing.x), Math.round(placing.y));
-    const col = ck.ok ? C.ok : C.bad;
+    const col = ck.ok ? C.ok : C.bad, ox = placing.x, oy = placing.y * K;
+    plan.roundRect(placing.x - hs, placing.y - hs, hs * 2, hs * 2, hs * 0.2).fill({ color: col, alpha: 0.18 }).stroke({ width: 2.5 / K, color: col });
     if (placing.type === 'pump') {
-      under.circle(placing.x, placing.y, PUMP.radius).stroke({ width: 1.5, color: C.gas, alpha: 0.55 });
+      plan.circle(placing.x, placing.y, PUMP.radius).stroke({ width: 1.5 / K, color: C.gas, alpha: 0.6 });
       let n = 0;
       for (const o of g.ents) if (o.team === ME && o.type === 'pump' && (o.x / SUB - placing.x) ** 2 + (o.y / SUB - placing.y) ** 2 < (PUMP.radius * 2) ** 2) n++;
-      setStatus(-1, n ? '與 ' + n + ' 座重疊：產量 -' + Math.min(80, 40 * n) + '%' : '', placing.x, placing.y - r - 26, C.bad);
+      setStatus(-1, n ? '與 ' + n + ' 座重疊：產量 -' + Math.min(80, 40 * n) + '%' : '', ox, oy - bldH(placing.type, r) - hs * K - 22, C.bad);
     } else setStatus(-1, '', 0, 0, 0);
-    bldShape(over, placing.x, placing.y, r).fill({ color: 0x22261e, alpha: 0.5 }).stroke({ width: 3, color: col });
-    setStatus(-2, T.ch, placing.x, placing.y, col, Math.round(r * 0.85));
-    setStatus(-3, ck.ok ? '' : ck.why, placing.x, placing.y + r + 16, C.bad);
-  } else { setStatus(-1, '', 0, 0, 0); setStatus(-2, '', 0, 0, 0); setStatus(-3, '', 0, 0, 0); }
-  // 特效
+    drawBuilding(placeGhost, placing.type, r, col, 0.55);
+    placeGhost.position.set(ox, oy);
+    placeGhost.visible = true;
+    setStatus(-2, T.ch, ox, oy - bldH(placing.type, r), col, Math.round(r * 0.7));
+    setStatus(-3, ck.ok ? '' : ck.why, ox, oy + hs * K + 16, C.bad);
+  } else { placeGhost.visible = false; setStatus(-1, '', 0, 0, 0); setStatus(-2, '', 0, 0, 0); setStatus(-3, '', 0, 0, 0); }
+  // 特效：地面標記壓扁成橢圓；爆炸畫在物件高度
   st.fx = st.fx.filter(f => t - f.t0 < (f.kind === 'boom' ? 450 : 600));
   for (const f of st.fx) {
-    if (f.kind === 'boom') { const k = (t - f.t0) / 450; over.circle(f.x, f.y, f.r * (0.4 + k * 0.6)).stroke({ width: 3, color: f.c, alpha: 1 - k }); }
-    else { const k = (t - f.t0) / 600; over.circle(f.x, f.y, f.r + 18 * (1 - k) + 6).stroke({ width: 3, color: f.c, alpha: 1 - k }); }
+    if (f.kind === 'boom') { const k = (t - f.t0) / 450; over.circle(f.x, f.y * K - 10, f.r * (0.4 + k * 0.6)).stroke({ width: 3, color: f.c, alpha: 1 - k }); }
+    else { const k = (t - f.t0) / 600; marks.circle(f.x, f.y, f.r + 18 * (1 - k) + 6).stroke({ width: 3 / K, color: f.c, alpha: 1 - k }); }
   }
   screen.clear();
   if (circle) screen.circle(circle.sx, circle.sy, circle.r).fill({ color: C.ok, alpha: 0.12 }).stroke({ width: 2, color: C.ok });
   app.render();
-}
-
-/** 轉向補間：每幀往目標角度轉一部分，走最短的方向 */
-function turnToward(a: number, b: number) {
-  let d = b - a;
-  d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
-  return Math.abs(d) < 0.01 ? b : a + d * 0.3;
 }
 
 function dashed(g: Graphics, x1: number, y1: number, x2: number, y2: number, color: number, width: number) {
@@ -380,6 +490,5 @@ function dashed(g: Graphics, x1: number, y1: number, x2: number, y2: number, col
     const a = i / n, b = Math.min(1, (i + 1) / n);
     g.moveTo(x1 + (x2 - x1) * a, y1 + (y2 - y1) * a).lineTo(x1 + (x2 - x1) * b, y1 + (y2 - y1) * b);
   }
-  g.stroke({ width, color });
+  g.stroke({ width: width / K, color });
 }
-

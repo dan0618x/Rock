@@ -11,7 +11,7 @@ import {
   armyAttack, cycleForm, formName, holdCmd, patrolMode, camTo, cancelCurrent, cancelSite, clampCam, confirmPlace, defZ, enterPlace, jumpTo, marker, nm, placeOk,
   produce, recall, selectAndJump, setMode, setSel, stopCamAnim, toggleLoop, upgrade, clearMode,
 } from './actions';
-import { C } from './render';
+import { C, K as TILT } from './render';
 import { ME, W, H, cam, countBy, ex, ey, isFiring, now, own, selEnts, selKind, st, view, type UiEvent } from './state';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -554,7 +554,7 @@ export function drawMini() {
     mctx.strokeStyle = '#e3a948'; mctx.lineWidth = 1.5 * dpr;
     mctx.beginPath(); mctx.arc(ev.x * sx, ev.y * sy, 6 * dpr, 0, 7); mctx.stroke();
   }
-  const hw = view.w / 2 / cam.z, hh = view.h / 2 / cam.z;
+  const hw = view.w / 2 / cam.z, hh = view.h / 2 / (cam.z * TILT);
   mctx.strokeStyle = '#ece6d6';
   mctx.lineWidth = 1.2 * dpr;
   mctx.strokeRect((cam.x - hw) * sx, (cam.y - hh) * sy, hw * 2 * sx, hh * 2 * sy);
